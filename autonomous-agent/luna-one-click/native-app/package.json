@@ -1,0 +1,69 @@
+{
+  "name": "luna-agent",
+  "version": "1.0.0",
+  "description": "Luna Agent - One-Click Automation",
+  "main": "dist/main.js",
+  "homepage": "https://luna-agent.com",
+  "author": "Luna Team",
+  "license": "Commercial",
+  "build": {
+    "appId": "com.lunaagent.app",
+    "productName": "Luna Agent",
+    "directories": {
+      "output": "dist-packages"
+    },
+    "files": [
+      "dist/**/*",
+      "vm-assets/**/*",
+      "node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "vm-assets/luna-vm.7z",
+        "to": "vm-image.7z"
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/luna-icon.ico",
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "assets/luna-icon.icns",
+      "category": "public.app-category.productivity"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "assets/luna-icon.png",
+      "category": "Office"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Luna Agent"
+    }
+  },
+  "scripts": {
+    "dev": "electron src/main.ts",
+    "build": "tsc && electron-builder",
+    "build-vm": "node scripts/build-vm.js",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "dist-all": "electron-builder -mwl"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.0.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "node-7z": "^3.0.0",
+    "systeminformation": "^5.21.0",
+    "axios": "^1.6.0",
+    "electron-updater": "^6.1.0"
+  }
+}

@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Containers vs VMs - Interactive Comparison</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a1a;
+            color: white;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 40px;
+            color: #3b82f6;
+        }
+        
+        .comparison {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 40px;
+            margin-bottom: 40px;
+        }
+        
+        .stack {
+            background: #2a2a2a;
+            border-radius: 12px;
+            padding: 20px;
+            border: 2px solid #404040;
+        }
+        
+        .stack h2 {
+            text-align: center;
+            margin-bottom: 20px;
+            color: #06b6d4;
+        }
+        
+        .layer {
+            margin-bottom: 10px;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            font-weight: 500;
+            transition: transform 0.2s ease;
+        }
+        
+        .layer:hover {
+            transform: translateY(-2px);
+        }
+        
+        .host-os {
+            background: #1e40af;
+            color: white;
+        }
+        
+        .hypervisor {
+            background: #7c3aed;
+            color: white;
+        }
+        
+        .guest-os {
+            background: #dc2626;
+            color: white;
+            margin: 5px;
+        }
+        
+        .app {
+            background: #059669;
+            color: white;
+            margin: 5px;
+            font-size: 14px;
+        }
+        
+        .kernel {
+            background: #d97706;
+            color: white;
+        }
+        
+        .container-layer {
+            background: #0891b2;
+            color: white;
+            margin: 5px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 40px;
+        }
+        
+        .vm-box {
+            background: #374151;
+            border: 1px solid #4b5563;
+            border-radius: 6px;
+            padding: 10px;
+            margin: 5px 0;
+        }
+        
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-top: 40px;
+        }
+        
+        .stat-card {
+            background: #2a2a2a;
+            border-radius: 8px;
+            padding: 20px;
+            border-left: 4px solid #3b82f6;
+        }
+        
+        .stat-title {
+            font-size: 14px;
+            color: #9ca3af;
+            margin-bottom: 5px;
+        }
+        
+        .stat-vm {
+            color: #ef4444;
+            font-weight: bold;
+        }
+        
+        .stat-container {
+            color: #10b981;
+            font-weight: bold;
+        }
+        
+        .recommendation {
+            background: linear-gradient(45deg, #1e40af, #7c3aed);
+            border-radius: 12px;
+            padding: 30px;
+            margin-top: 40px;
+            text-align: center;
+        }
+        
+        .tabs {
+            display: flex;
+            margin-bottom: 20px;
+            background: #374151;
+            border-radius: 8px;
+            padding: 4px;
+        }
+        
+        .tab {
+            flex: 1;
+            padding: 12px;
+            text-align: center;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .tab.active {
+            background: #3b82f6;
+            color: white;
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        @media (max-width: 768px) {
+            .comparison {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🖥️ Containers vs Virtual Machines</h1>
+        
+        <div class="tabs">
+            <div class="tab active" onclick="showTab('architecture')">Architecture</div>
+            <div class="tab" onclick="showTab('performance')">Performance</div>
+            <div class="tab" onclick="showTab('luna')">For Luna Agent</div>
+        </div>
+        
+        <div id="architecture" class="tab-content active">
+            <div class="comparison">
+                <div class="stack">
+                    <h2>🖥️ Virtual Machine</h2>
+                    <div class="layer host-os">Host Operating System (Windows/macOS/Linux)</div>
+                    <div class="layer hypervisor">Hypervisor (VMware/VirtualBox/Hyper-V)</div>
+                    
+                    <div class="vm-box">
+                        <div class="layer guest-os">Guest OS #1 (Ubuntu Linux)</div>
+                        <div class="layer app">Luna Agent</div>
+                    </div>
+                    
+                    <div class="vm-box">
+                        <div class="layer guest-os">Guest OS #2 (Windows)</div>
+                        <div class="layer app">Other App</div>
+                    </div>
+                    
+                    <div style="margin-top: 15px; font-size: 12px; color: #9ca3af;">
+                        ✓ Complete isolation<br>
+                        ✓ Different OS types<br>
+                        ✗ Heavy resource usage<br>
+                        ✗ Slower startup
+                    </div>
+                </div>
+                
+                <div class="stack">
+                    <h2>📦 Container</h2>
+                    <div class="layer host-os">Host Operating System</div>
+                    <div class="layer kernel">Shared Kernel (Linux)</div>
+                    
+                    <div style="display: flex; gap: 5px; margin: 10px 0;">
+                        <div class="container-layer" style="flex: 1;">Luna Agent</div>
+                        <div class="container-layer" style="flex: 1;">Web App</div>
+                        <div class="container-layer" style="flex: 1;">Database</div>
+                    </div>
+                    
+                    <div style="margin-top: 15px; font-size: 12px; color: #9ca3af;">
+                        ✓ Lightweight & fast<br>
+                        ✓ Easy to manage<br>
+                        ✓ Resource efficient<br>
+                        ✗ Shared kernel only
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div id="performance" class="tab-content">
+            <div class="stats">
+                <div class="stat-card">
+                    <div class="stat-title">Memory Usage</div>
+                    <div class="stat-vm">VM: 1-4GB per instance</div>
+                    <div class="stat-container">Container: 50-500MB</div>
+                </div>
+                
+                <div class="stat-card">
+                    <div class="stat-title">Startup Time</div>
+                    <div class="stat-vm">VM: 30-120 seconds</div>
+                    <div class="stat-container">Container: 1-10 seconds</div>
+                </div>
+                
+                <div class="stat-card">
+                    <div class="stat-title">Disk Space</div>
+                    <div class="stat-vm">VM: 1-20GB per instance</div>
+                    <div class="stat-container">Container: 100MB-1GB</div>
+                </div>
+                
+                <div class="stat-card">
+                    <div class="stat-title">CPU Overhead</div>
+                    <div class="stat-vm">VM: 5-15% overhead</div>
+                    <div class="stat-container">Container: 1-3% overhead</div>
+                </div>
+                
+                <div class="stat-card">
+                    <div class="stat-title">Isolation Level</div>
+                    <div class="stat-vm">VM: Hardware-level</div>
+                    <div class="stat-container">Container: Process-level</div>
+                </div>
+                
+                <div class="stat-card">
+                    <div class="stat-title">Scalability</div>
+                    <div class="stat-vm">VM: 5-20 per host</div>
+                    <div class="stat-container">Container: 50-1000 per host</div>
+                </div>
+            </div>
+        </div>
+        
+        <div id="luna" class="tab-content">
+            <div class="comparison">
+                <div class="stack">
+                    <h2>🌙 Luna with Containers</h2>
+                    <div class="layer host-os">User's Computer (Any OS)</div>
+                    <div class="layer kernel">Docker/Podman</div>
+                    <div class="layer container-layer">Luna Agent Container</div>
+                    
+                    <div style="margin-top: 20px;">
+                        <h3 style="color: #10b981; margin-bottom: 10px;">✅ Perfect for MVP</h3>
+                        <ul style="font-size: 14px; line-height: 1.6; color: #d1d5db;">
+                            <li>User clicks → Luna ready in 5 seconds</li>
+                            <li>Only 200-500MB RAM usage</li>
+                            <li>Easy to distribute and update</li>
+                            <li>Works on Windows/Mac/Linux</li>
+                            <li>Simpler development</li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <div class="stack">
+                    <h2>🌙 Luna with VMs</h2>
+                    <div class="layer host-os">User's Computer (Any OS)</div>
+                    <div class="layer hypervisor">VM Software</div>
+                    <div class="vm-box">
+                        <div class="layer guest-os">Ubuntu Linux</div>
+                        <div class="layer app">Luna Agent</div>
+                    </div>
+                    
+                    <div style="margin-top: 20px;">
+                        <h3 style="color: #3b82f6; margin-bottom: 10px;">🛡️ For Enterprise</h3>
+                        <ul style="font-size: 14px; line-height: 1.6; color: #d1d5db;">
+                            <li>Maximum security isolation</li>
+                            <li>Complete Linux environment</li>
+                            <li>Can run any Linux software</li>
+                            <li>Professional deployment</li>
+                            <li>Regulatory compliance</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="recommendation">
+            <h2>🎯 Recommendation for Luna Agent</h2>
+            <p style="font-size: 18px; margin: 20px 0;">
+                <strong>Start with containers, add VMs later</strong>
+            </p>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-top: 30px;">
+                <div>
+                    <h3>Phase 1: Container MVP</h3>
+                    <p>Fast development, great UX, easy distribution</p>
+                </div>
+                <div>
+                    <h3>Phase 2: VM Option</h3>
+                    <p>Enterprise security, full isolation, compliance</p>
+                </div>
+                <div>
+                    <h3>Phase 3: Hybrid</h3>
+                    <p>Auto-detect needs, let users choose</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        function showTab(tabName) {
+            // Hide all tab contents
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            
+            // Remove active class from all tabs
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Show selected tab content
+            document.getElementById(tabName).classList.add('active');
+            
+            // Add active class to clicked tab
+            event.target.classList.add('active');
+        }
+        
+        // Add hover effects to layers
+        document.querySelectorAll('.layer').forEach(layer => {
+            layer.addEventListener('mouseenter', function() {
+                this.style.transform = 'translateY(-3px)';
+                this.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
+            });
+            
+            layer.addEventListener('mouseleave', function() {
+                this.style.transform = 'translateY(0)';
+                this.style.boxShadow = 'none';
+            });
+        });
+    </script>
+</body>
+</html>

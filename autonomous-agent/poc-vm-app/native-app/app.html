@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Luna Agent - Native Interface</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            color: white;
+            height: 100vh;
+            overflow: hidden;
+        }
+        
+        .app-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        
+        .title-bar {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 12px 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .luna-icon {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: linear-gradient(45deg, #3b82f6, #06b6d4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .connection-status {
+            margin-left: auto;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #10b981;
+            box-shadow: 0 0 8px #10b981;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .vm-frame {
+            flex: 1;
+            border: none;
+            background: white;
+        }
+        
+        .loading-screen {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 20px;
+        }
+        
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 3px solid rgba(255, 255, 255, 0.1);
+            border-top: 3px solid #3b82f6;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <div class="title-bar">
+            <div class="luna-icon">🌙</div>
+            <h1 style="font-size: 16px; font-weight: 600;">Luna Agent</h1>
+            <div class="connection-status">
+                <div class="status-dot"></div>
+                <span style="font-size: 12px; opacity: 0.8;">Connected to VM</span>
+            </div>
+        </div>
+        
+        <div class="loading-screen" id="loadingScreen">
+            <div class="loading-spinner"></div>
+            <h2>Starting Luna...</h2>
+            <p style="opacity: 0.7;">Initializing virtual environment</p>
+        </div>
+        
+        <iframe 
+            id="lunaFrame" 
+            class="vm-frame hidden" 
+            src="http://localhost:8080"
+            sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox">
+        </iframe>
+    </div>
+
+    <script>
+        // Simulate native app behavior
+        let connectionAttempts = 0;
+        const maxAttempts = 30;
+        
+        function checkLunaConnection() {
+            fetch('http://localhost:8080/health')
+                .then(response => {
+                    if (response.ok) {
+                        // Luna is ready, show the interface
+                        document.getElementById('loadingScreen').classList.add('hidden');
+                        document.getElementById('lunaFrame').classList.remove('hidden');
+                        
+                        // Update status
+                        document.querySelector('.connection-status span').textContent = 'Luna Ready';
+                    } else {
+                        throw new Error('Not ready');
+                    }
+                })
+                .catch(() => {
+                    connectionAttempts++;
+                    if (connectionAttempts < maxAttempts) {
+                        setTimeout(checkLunaConnection, 2000);
+                    } else {
+                        // Show error state
+                        document.getElementById('loadingScreen').innerHTML = `
+                            <h2>❌ Failed to Connect</h2>
+                            <p>Unable to start Luna VM</p>
+                            <button onclick="location.reload()" style="margin-top: 20px; padding: 10px 20px; background: #3b82f6; color: white; border: none; border-radius: 5px; cursor: pointer;">
+                                Try Again
+                            </button>
+                        `;
+                    }
+                });
+        }
+        
+        // Start checking for Luna
+        setTimeout(checkLunaConnection, 3000);
+        
+        // Simulate native window controls
+        document.addEventListener('keydown', (e) => {
+            // Cmd/Ctrl + W to close (simulated)
+            if ((e.metaKey || e.ctrlKey) && e.key === 'w') {
+                if (confirm('Close Luna Agent?')) {
+                    window.close();
+                }
+            }
+            
+            // F11 for fullscreen (simulated)
+            if (e.key === 'F11') {
+                if (document.fullscreenElement) {
+                    document.exitFullscreen();
+                } else {
+                    document.documentElement.requestFullscreen();
+                }
+            }
+        });
+        
+        // Handle iframe load errors
+        document.getElementById('lunaFrame').addEventListener('error', () => {
+            console.log('Failed to load Luna interface');
+        });
+        
+        // Simulate native app lifecycle
+        window.addEventListener('beforeunload', (e) => {
+            // In real app, this would gracefully shutdown the VM
+            console.log('Native app closing - would shutdown VM');
+        });
+        
+        // Add context menu for debugging
+        window.addEventListener('contextmenu', (e) => {
+            if (e.shiftKey) {
+                // Allow right-click when Shift is held (for debugging)
+                return;
+            }
+            e.preventDefault();
+        });
+        
+        // Simulate native app title updates
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                document.title = 'Luna Agent (Background)';
+            } else {
+                document.title = 'Luna Agent';
+            }
+        });
+    </script>
+</body>
+</html>

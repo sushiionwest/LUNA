@@ -1,0 +1,65 @@
+#!/bin/bash
+
+# 🌙 Luna Launcher Script
+# Wakes up Luna with a friendly interface
+
+echo "🌙 Waking up Luna..."
+echo ""
+
+# Check if bun is available
+if ! command -v bun &> /dev/null; then
+    echo "❌ Bun is not installed. Please install Bun first:"
+    echo "   curl -fsSL https://bun.sh/install | bash"
+    exit 1
+fi
+
+# Check if dependencies are installed
+if [ ! -d "node_modules" ]; then
+    echo "📦 Installing Luna's dependencies..."
+    bun install
+    echo ""
+fi
+
+# Check if .env file exists
+if [ ! -f ".env" ]; then
+    echo "⚙️  Setting up Luna's environment..."
+    cp .env.example .env
+    echo "✅ Created .env file. Please edit it with your API keys:"
+    echo "   - Microsoft Vision API"
+    echo "   - Twitter API credentials"
+    echo "   - Other service configurations"
+    echo ""
+    echo "📝 Edit .env file now? (y/n)"
+    read -r response
+    if [[ "$response" =~ ^[Yy]$ ]]; then
+        ${EDITOR:-nano} .env
+    fi
+    echo ""
+fi
+
+echo "🌟 Luna is ready! Starting her systems..."
+echo ""
+echo "🖥️  Luna's Dashboard: http://localhost:5173"
+echo "🔧 Luna's API: http://localhost:3001"
+echo "💚 Health Check: http://localhost:3001/health"
+echo ""
+echo "🌙 Use Ctrl+C to let Luna rest when you're done"
+echo ""
+
+# Create a trap to handle Ctrl+C gracefully
+trap 'echo ""; echo "🌙 Luna is going to sleep. Sweet dreams!"; exit 0' INT
+
+# Start both frontend and backend
+echo "🚀 Starting Luna's backend..."
+bun run server &
+BACKEND_PID=$!
+
+# Wait a moment for backend to start
+sleep 3
+
+echo "🎨 Starting Luna's interface..."
+bun run dev &
+FRONTEND_PID=$!
+
+# Wait for both processes
+wait $BACKEND_PID $FRONTEND_PID

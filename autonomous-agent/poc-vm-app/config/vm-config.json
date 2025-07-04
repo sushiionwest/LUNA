@@ -1,0 +1,74 @@
+{
+  "vm": {
+    "name": "luna-agent",
+    "memory": "1024MB",
+    "cpus": 2,
+    "disk": "2GB",
+    "os": "ubuntu-22.04-minimal",
+    "network": {
+      "mode": "NAT",
+      "portForwarding": [
+        {
+          "host": 8080,
+          "guest": 8080,
+          "protocol": "tcp",
+          "description": "Luna web interface"
+        },
+        {
+          "host": 5900,
+          "guest": 5900,
+          "protocol": "tcp",
+          "description": "VNC display (optional)"
+        }
+      ]
+    }
+  },
+  "luna": {
+    "autoStart": true,
+    "webInterface": {
+      "port": 8080,
+      "host": "0.0.0.0"
+    },
+    "features": {
+      "screenCapture": true,
+      "windowAutomation": true,
+      "socialMedia": true,
+      "aiVision": true
+    },
+    "resources": {
+      "maxMemoryUsage": "512MB",
+      "maxCpuUsage": "80%",
+      "tempDirectory": "/tmp/luna",
+      "dataDirectory": "/opt/luna/data"
+    }
+  },
+  "security": {
+    "networkIsolation": true,
+    "readOnlyHostAccess": true,
+    "sandboxMode": true,
+    "allowedDomains": [
+      "api.openai.com",
+      "api.anthropic.com",
+      "twitter.com",
+      "x.com"
+    ]
+  },
+  "nativeApp": {
+    "title": "Luna Agent",
+    "windowSize": {
+      "width": 1200,
+      "height": 800,
+      "minWidth": 800,
+      "minHeight": 600
+    },
+    "trayIcon": true,
+    "autoHide": false,
+    "alwaysOnTop": false
+  },
+  "updates": {
+    "autoCheck": true,
+    "channel": "stable",
+    "updateUrl": "https://releases.luna-agent.com",
+    "vmImageUrl": "https://images.luna-agent.com"
+  }
+}
