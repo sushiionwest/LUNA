@@ -1,0 +1,20 @@
+{
+  "name": "luna-testing-demo",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Luna One-Click Installer Testing Infrastructure Demo",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test-session.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "nodemailer": "^6.9.7",
+    "socket.io": "^4.7.4",
+    "socket.io-client": "^4.8.1",
+    "sqlite3": "^5.1.6",
+    "uuid": "^9.0.1"
+  }
+}

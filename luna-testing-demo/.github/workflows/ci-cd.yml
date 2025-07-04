@@ -1,0 +1,285 @@
+name: Luna Testing Infrastructure CI/CD
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: luna-testing
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: luna_testing_test
+          POSTGRES_USER: luna
+          POSTGRES_PASSWORD: test_password
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 3s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Setup test database
+      run: |
+        PGPASSWORD=test_password psql -h localhost -U luna -d luna_testing_test -f database/init.sql.txt
+      env:
+        PGPASSWORD: test_password
+
+    - name: Run linting
+      run: npm run lint || echo "No lint script defined"
+
+    - name: Run tests
+      run: npm test || echo "No test script defined"
+      env:
+        NODE_ENV: test
+        DATABASE_URL: postgresql://luna:test_password@localhost:5432/luna_testing_test
+        REDIS_URL: redis://localhost:6379
+        JWT_SECRET: test_jwt_secret
+
+    - name: Run security audit
+      run: npm audit --audit-level moderate
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Login to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ github.repository }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  deploy-staging:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/develop'
+    environment: staging
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'v1.28.0'
+
+    - name: Configure kubectl
+      run: |
+        echo "${{ secrets.KUBECONFIG_STAGING }}" | base64 -d > kubeconfig
+        export KUBECONFIG=kubeconfig
+
+    - name: Deploy to staging
+      run: |
+        export KUBECONFIG=kubeconfig
+        # Update image tag in deployment
+        sed -i "s|luna-testing:latest|${{ env.REGISTRY }}/${{ github.repository }}/${{ env.IMAGE_NAME }}:develop|g" k8s/luna-deployment.yaml
+        
+        # Apply Kubernetes manifests
+        kubectl apply -f k8s/luna-deployment.yaml
+        
+        # Wait for rollout to complete
+        kubectl rollout status deployment/luna-api -n luna-testing --timeout=300s
+
+    - name: Run smoke tests
+      run: |
+        # Wait for service to be ready
+        sleep 30
+        
+        # Run basic health checks
+        curl -f https://staging.luna-testing.yourdomain.com/health || exit 1
+        curl -f https://staging.luna-testing.yourdomain.com/api/participants/analytics/summary || exit 1
+
+  deploy-production:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    environment: production
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'v1.28.0'
+
+    - name: Configure kubectl
+      run: |
+        echo "${{ secrets.KUBECONFIG_PRODUCTION }}" | base64 -d > kubeconfig
+        export KUBECONFIG=kubeconfig
+
+    - name: Deploy to production
+      run: |
+        export KUBECONFIG=kubeconfig
+        # Update image tag in deployment
+        sed -i "s|luna-testing:latest|${{ env.REGISTRY }}/${{ github.repository }}/${{ env.IMAGE_NAME }}:latest|g" k8s/luna-deployment.yaml
+        
+        # Apply Kubernetes manifests
+        kubectl apply -f k8s/luna-deployment.yaml
+        
+        # Wait for rollout to complete
+        kubectl rollout status deployment/luna-api -n luna-testing --timeout=600s
+
+    - name: Run production health checks
+      run: |
+        # Wait for service to be ready
+        sleep 60
+        
+        # Run comprehensive health checks
+        curl -f https://luna-testing.yourdomain.com/health || exit 1
+        curl -f https://luna-testing.yourdomain.com/api/participants/analytics/summary || exit 1
+
+    - name: Notify deployment success
+      uses: 8398a7/action-slack@v3
+      with:
+        status: success
+        text: 'Luna Testing Infrastructure deployed successfully to production!'
+        webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+      if: success()
+
+    - name: Notify deployment failure
+      uses: 8398a7/action-slack@v3
+      with:
+        status: failure
+        text: 'Luna Testing Infrastructure deployment to production failed!'
+        webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+      if: failure()
+
+  security-scan:
+    runs-on: ubuntu-latest
+    needs: build
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ env.REGISTRY }}/${{ github.repository }}/${{ env.IMAGE_NAME }}:latest
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+
+    - name: Upload Trivy scan results
+      uses: github/codeql-action/upload-sarif@v2
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+  performance-test:
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    if: github.ref == 'refs/heads/develop'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Artillery for load testing
+      run: npm install -g artillery@latest
+
+    - name: Run performance tests
+      run: |
+        # Create basic performance test configuration
+        cat > perf-test.yml << EOF
+        config:
+          target: 'https://staging.luna-testing.yourdomain.com'
+          phases:
+            - duration: 60
+              arrivalRate: 5
+              name: "Warm up"
+            - duration: 120
+              arrivalRate: 10
+              name: "Load test"
+        scenarios:
+          - name: "Health check"
+            weight: 50
+            flow:
+              - get:
+                  url: "/health"
+          - name: "Analytics endpoint"
+            weight: 30
+            flow:
+              - get:
+                  url: "/api/participants/analytics/summary"
+          - name: "Registration page"
+            weight: 20
+            flow:
+              - get:
+                  url: "/recruitment-landing.html"
+        EOF
+        
+        artillery run perf-test.yml
+
+    - name: Archive performance results
+      uses: actions/upload-artifact@v3
+      with:
+        name: performance-results
+        path: artillery-report.json

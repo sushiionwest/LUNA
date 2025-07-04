@@ -1,0 +1,329 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: luna-testing
+  labels:
+    name: luna-testing
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: luna-config
+  namespace: luna-testing
+data:
+  NODE_ENV: "production"
+  LOG_LEVEL: "info"
+  PORT: "3000"
+  CORS_ORIGIN: "https://luna-testing.yourdomain.com"
+  ENABLE_REGISTRATION: "true"
+  ENABLE_EMAIL_NOTIFICATIONS: "true"
+  ENABLE_ANALYTICS: "true"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: luna-secrets
+  namespace: luna-testing
+type: Opaque
+stringData:
+  POSTGRES_PASSWORD: "luna_secure_password_2024!"
+  REDIS_PASSWORD: "redis_secure_password_2024!"
+  JWT_SECRET: "luna_jwt_super_secret_key_2024_change_this!"
+  EMAIL_API_KEY: "your_sendgrid_api_key_here"
+  GRAFANA_PASSWORD: "grafana_admin_password_2024!"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: luna-api
+  namespace: luna-testing
+  labels:
+    app: luna-api
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: luna-api
+  template:
+    metadata:
+      labels:
+        app: luna-api
+    spec:
+      containers:
+      - name: luna-api
+        image: luna-testing:latest
+        ports:
+        - containerPort: 3000
+        env:
+        - name: DATABASE_URL
+          value: "postgresql://luna:$(POSTGRES_PASSWORD)@postgres:5432/luna_testing"
+        - name: REDIS_URL
+          value: "redis://default:$(REDIS_PASSWORD)@redis:6379"
+        envFrom:
+        - configMapRef:
+            name: luna-config
+        - secretRef:
+            name: luna-secrets
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        volumeMounts:
+        - name: uploads
+          mountPath: /app/uploads
+        - name: logs
+          mountPath: /app/logs
+      volumes:
+      - name: uploads
+        persistentVolumeClaim:
+          claimName: luna-uploads-pvc
+      - name: logs
+        persistentVolumeClaim:
+          claimName: luna-logs-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: luna-api-service
+  namespace: luna-testing
+spec:
+  selector:
+    app: luna-api
+  ports:
+    - protocol: TCP
+      port: 3000
+      targetPort: 3000
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: luna-testing
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:15-alpine
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_DB
+          value: "luna_testing"
+        - name: POSTGRES_USER
+          value: "luna"
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: luna-secrets
+              key: POSTGRES_PASSWORD
+        volumeMounts:
+        - name: postgres-storage
+          mountPath: /var/lib/postgresql/data
+        - name: init-sql
+          mountPath: /docker-entrypoint-initdb.d
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+      volumes:
+      - name: init-sql
+        configMap:
+          name: postgres-init
+  volumeClaimTemplates:
+  - metadata:
+      name: postgres-storage
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: luna-testing
+spec:
+  selector:
+    app: postgres
+  ports:
+    - protocol: TCP
+      port: 5432
+      targetPort: 5432
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: luna-testing
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        ports:
+        - containerPort: 6379
+        command: ["redis-server"]
+        args: ["--requirepass", "$(REDIS_PASSWORD)"]
+        env:
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: luna-secrets
+              key: REDIS_PASSWORD
+        volumeMounts:
+        - name: redis-storage
+          mountPath: /data
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+      volumes:
+      - name: redis-storage
+        persistentVolumeClaim:
+          claimName: redis-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: luna-testing
+spec:
+  selector:
+    app: redis
+  ports:
+    - protocol: TCP
+      port: 6379
+      targetPort: 6379
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: luna-ingress
+  namespace: luna-testing
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+spec:
+  tls:
+  - hosts:
+    - luna-testing.yourdomain.com
+    secretName: luna-tls-secret
+  rules:
+  - host: luna-testing.yourdomain.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: luna-api-service
+            port:
+              number: 3000
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: luna-uploads-pvc
+  namespace: luna-testing
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: luna-logs-pvc
+  namespace: luna-testing
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-pvc
+  namespace: luna-testing
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: luna-api-hpa
+  namespace: luna-testing
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: luna-api
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
