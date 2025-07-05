@@ -1,0 +1,40 @@
+{
+  "name": "luna-accessibility-tests",
+  "version": "1.0.0",
+  "description": "Accessibility and visual regression tests for Luna Agent",
+  "private": true,
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:debug": "playwright test --debug",
+    "test:ui": "playwright test --ui",
+    "test:report": "playwright show-report",
+    "test:accessibility": "playwright test --grep=\"Accessibility Overlay\"",
+    "test:update-snapshots": "playwright test --update-snapshots",
+    "install:browsers": "playwright install",
+    "install:deps": "playwright install-deps",
+    "setup": "npm run install:browsers && npm run install:deps"
+  },
+  "keywords": [
+    "accessibility",
+    "visual-regression",
+    "playwright",
+    "testing",
+    "luna",
+    "ui-automation"
+  ],
+  "devDependencies": {
+    "@playwright/test": "^1.40.0",
+    "@types/node": "^20.10.0",
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/luna"
+  },
+  "author": "Luna Team",
+  "license": "MIT"
+}
