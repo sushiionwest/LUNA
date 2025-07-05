@@ -1,0 +1,203 @@
+-- Luna Testing Infrastructure Database Schema
+-- PostgreSQL Version
+
+-- Enable UUID extension
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- Create enum types for better data integrity
+CREATE TYPE user_experience AS ENUM ('expert', 'advanced', 'intermediate', 'beginner');
+CREATE TYPE testing_phase AS ENUM ('phase-1', 'phase-2', 'phase-3');
+CREATE TYPE participant_status AS ENUM ('registered', 'scheduled', 'completed', 'cancelled', 'no-show');
+CREATE TYPE session_status AS ENUM ('pending', 'active', 'completed', 'failed', 'cancelled');
+CREATE TYPE vm_status AS ENUM ('starting', 'running', 'stopped', 'failed');
+
+-- Participants table
+CREATE TABLE participants (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name VARCHAR(255) NOT NULL,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    role VARCHAR(100),
+    experience user_experience,
+    os VARCHAR(50),
+    motivation TEXT,
+    availability VARCHAR(100),
+    newsletter BOOLEAN DEFAULT false,
+    testing_phase testing_phase,
+    status participant_status DEFAULT 'registered',
+    session_type VARCHAR(100),
+    scheduled_at TIMESTAMP WITH TIME ZONE,
+    notes TEXT,
+    metadata JSONB DEFAULT '{}',
+    registered_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Sessions table
+CREATE TABLE sessions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    participant_id UUID REFERENCES participants(id) ON DELETE SET NULL,
+    session_type VARCHAR(100),
+    status session_status DEFAULT 'pending',
+    start_time TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    end_time TIMESTAMP WITH TIME ZONE,
+    vm_id UUID,
+    installer_version VARCHAR(50),
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Events table for tracking user interactions
+CREATE TABLE events (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    session_id UUID REFERENCES sessions(id) ON DELETE CASCADE,
+    event_type VARCHAR(100) NOT NULL,
+    event_data JSONB DEFAULT '{}',
+    user_agent TEXT,
+    ip_address INET,
+    timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Luna VM instances table
+CREATE TABLE luna_vms (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    session_id UUID REFERENCES sessions(id) ON DELETE CASCADE,
+    status vm_status DEFAULT 'starting',
+    vm_path TEXT,
+    port INTEGER,
+    pid INTEGER,
+    resource_limits JSONB DEFAULT '{}',
+    performance_metrics JSONB DEFAULT '{}',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Analytics aggregation table
+CREATE TABLE analytics_daily (
+    date DATE PRIMARY KEY,
+    total_participants INTEGER DEFAULT 0,
+    total_sessions INTEGER DEFAULT 0,
+    successful_installations INTEGER DEFAULT 0,
+    average_session_duration INTERVAL,
+    phase_1_count INTEGER DEFAULT 0,
+    phase_2_count INTEGER DEFAULT 0,
+    phase_3_count INTEGER DEFAULT 0,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Feedback table
+CREATE TABLE feedback (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    session_id UUID REFERENCES sessions(id) ON DELETE CASCADE,
+    participant_id UUID REFERENCES participants(id) ON DELETE CASCADE,
+    rating INTEGER CHECK (rating >= 1 AND rating <= 10),
+    ease_of_use_rating INTEGER CHECK (ease_of_use_rating >= 1 AND ease_of_use_rating <= 10),
+    satisfaction_rating INTEGER CHECK (satisfaction_rating >= 1 AND satisfaction_rating <= 10),
+    would_recommend BOOLEAN,
+    comments TEXT,
+    suggestions TEXT,
+    reported_issues TEXT,
+    completion_time INTERVAL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Create indexes for performance
+CREATE INDEX idx_participants_email ON participants(email);
+CREATE INDEX idx_participants_testing_phase ON participants(testing_phase);
+CREATE INDEX idx_participants_status ON participants(status);
+CREATE INDEX idx_participants_registered_at ON participants(registered_at);
+
+CREATE INDEX idx_sessions_participant_id ON sessions(participant_id);
+CREATE INDEX idx_sessions_status ON sessions(status);
+CREATE INDEX idx_sessions_start_time ON sessions(start_time);
+
+CREATE INDEX idx_events_session_id ON events(session_id);
+CREATE INDEX idx_events_event_type ON events(event_type);
+CREATE INDEX idx_events_timestamp ON events(timestamp);
+
+CREATE INDEX idx_luna_vms_session_id ON luna_vms(session_id);
+CREATE INDEX idx_luna_vms_status ON luna_vms(status);
+
+CREATE INDEX idx_feedback_session_id ON feedback(session_id);
+CREATE INDEX idx_feedback_rating ON feedback(rating);
+
+-- Create update timestamp trigger function
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+-- Create triggers for updated_at columns
+CREATE TRIGGER update_participants_updated_at BEFORE UPDATE ON participants 
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_sessions_updated_at BEFORE UPDATE ON sessions 
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_luna_vms_updated_at BEFORE UPDATE ON luna_vms 
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Create a function to automatically update daily analytics
+CREATE OR REPLACE FUNCTION update_daily_analytics()
+RETURNS TRIGGER AS $$
+BEGIN
+    INSERT INTO analytics_daily (date, total_participants, total_sessions, successful_installations, phase_1_count, phase_2_count, phase_3_count)
+    VALUES (CURRENT_DATE, 0, 0, 0, 0, 0, 0)
+    ON CONFLICT (date) DO NOTHING;
+    
+    -- Update participant counts by phase
+    UPDATE analytics_daily SET
+        total_participants = (SELECT COUNT(*) FROM participants WHERE DATE(registered_at) = CURRENT_DATE),
+        phase_1_count = (SELECT COUNT(*) FROM participants WHERE testing_phase = 'phase-1' AND DATE(registered_at) = CURRENT_DATE),
+        phase_2_count = (SELECT COUNT(*) FROM participants WHERE testing_phase = 'phase-2' AND DATE(registered_at) = CURRENT_DATE),
+        phase_3_count = (SELECT COUNT(*) FROM participants WHERE testing_phase = 'phase-3' AND DATE(registered_at) = CURRENT_DATE),
+        updated_at = NOW()
+    WHERE date = CURRENT_DATE;
+    
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Create trigger for automatic analytics updates
+CREATE TRIGGER update_analytics_on_participant_insert 
+    AFTER INSERT ON participants 
+    FOR EACH ROW EXECUTE FUNCTION update_daily_analytics();
+
+-- Insert some sample data for testing
+INSERT INTO participants (name, email, role, experience, os, motivation, testing_phase, status) VALUES
+('Demo Technical User', 'tech@demo.com', 'developer', 'expert', 'linux', 'Want to test advanced features', 'phase-1', 'registered'),
+('Demo Business User', 'business@demo.com', 'entrepreneur', 'intermediate', 'windows', 'Need workflow automation', 'phase-2', 'registered'),
+('Demo Consumer User', 'consumer@demo.com', 'student', 'beginner', 'macos', 'AI sounds interesting', 'phase-3', 'registered');
+
+-- Create views for common queries
+CREATE VIEW participant_summary AS
+SELECT 
+    testing_phase,
+    status,
+    COUNT(*) as count,
+    AVG(CASE WHEN feedback.rating IS NOT NULL THEN feedback.rating END) as avg_rating
+FROM participants 
+LEFT JOIN sessions ON participants.id = sessions.participant_id
+LEFT JOIN feedback ON sessions.id = feedback.session_id
+GROUP BY testing_phase, status;
+
+CREATE VIEW session_analytics AS
+SELECT 
+    DATE(start_time) as date,
+    COUNT(*) as total_sessions,
+    COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_sessions,
+    AVG(EXTRACT(EPOCH FROM (end_time - start_time))) as avg_duration_seconds
+FROM sessions 
+WHERE start_time IS NOT NULL
+GROUP BY DATE(start_time)
+ORDER BY date DESC;
+
+-- Grant permissions to the application user
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO luna;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO luna;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO luna;
+
+COMMIT;
