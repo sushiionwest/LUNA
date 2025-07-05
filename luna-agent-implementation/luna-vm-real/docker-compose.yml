@@ -1,0 +1,133 @@
+version: '3.8'
+
+# Luna Agent VM - Real Implementation
+# Complete automation environment with all capabilities
+
+services:
+  luna-vm:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: luna-agent-vm-real
+    hostname: luna-vm
+    privileged: true  # Required for full system access
+    ports:
+      - "8080:8080"   # Luna API
+      - "3000:3000"   # Luna UI (alternative)
+      - "5900:5900"   # VNC Server
+      - "22222:22222" # SSH Access
+      - "6080:6080"   # noVNC (web-based VNC)
+    volumes:
+      # Persistent data
+      - luna-vm-data:/opt/luna-agent/data
+      - luna-vm-screenshots:/opt/luna-agent/screenshots
+      - luna-vm-downloads:/opt/luna-agent/downloads
+      - luna-vm-logs:/opt/luna-agent/logs
+      # Shared folders for development
+      - ./shared:/opt/luna-agent/shared
+    environment:
+      - DISPLAY=:99
+      - LUNA_HOME=/opt/luna-agent
+      - LUNA_LOG_LEVEL=INFO
+      - LUNA_API_PORT=8080
+      - LUNA_UI_PORT=3000
+      - VNC_PASSWORD=luna123
+      - SSH_PASSWORD=luna123
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - luna-network
+
+  # Optional: Database for task storage
+  luna-db:
+    image: postgres:15-alpine
+    container_name: luna-database
+    environment:
+      - POSTGRES_DB=luna_agent
+      - POSTGRES_USER=luna
+      - POSTGRES_PASSWORD=luna_secure
+    volumes:
+      - luna-db-data:/var/lib/postgresql/data
+    networks:
+      - luna-network
+    profiles:
+      - database
+
+  # Optional: Redis for caching and task queues
+  luna-redis:
+    image: redis:7-alpine
+    container_name: luna-redis
+    volumes:
+      - luna-redis-data:/data
+    networks:
+      - luna-network
+    profiles:
+      - cache
+
+  # Optional: Monitoring with Prometheus
+  luna-monitoring:
+    image: prom/prometheus:latest
+    container_name: luna-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - luna-prometheus-data:/prometheus
+    networks:
+      - luna-network
+    profiles:
+      - monitoring
+
+  # Optional: Web-based VNC client
+  novnc:
+    image: theasp/novnc:latest
+    container_name: luna-novnc
+    ports:
+      - "6080:6080"
+    environment:
+      - DISPLAY_WIDTH=1920
+      - DISPLAY_HEIGHT=1080
+      - VNC_SERVER=luna-vm:5900
+      - VNC_PASSWORD=luna123
+    depends_on:
+      - luna-vm
+    networks:
+      - luna-network
+    profiles:
+      - vnc
+
+volumes:
+  luna-vm-data:
+    driver: local
+    name: luna-vm-data
+  luna-vm-screenshots:
+    driver: local
+    name: luna-vm-screenshots
+  luna-vm-downloads:
+    driver: local
+    name: luna-vm-downloads
+  luna-vm-logs:
+    driver: local
+    name: luna-vm-logs
+  luna-db-data:
+    driver: local
+    name: luna-db-data
+  luna-redis-data:
+    driver: local
+    name: luna-redis-data
+  luna-prometheus-data:
+    driver: local
+    name: luna-prometheus-data
+
+networks:
+  luna-network:
+    driver: bridge
+    name: luna-network
+    ipam:
+      config:
+        - subnet: 172.30.0.0/16

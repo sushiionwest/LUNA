@@ -1,0 +1,845 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Luna Agent Installer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #ffffff;
+            overflow-x: hidden;
+            user-select: none;
+        }
+
+        /* Windows-specific styles */
+        body.windows {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        .installer-container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(20px);
+            border-radius: 24px;
+            padding: 48px;
+            width: 90%;
+            max-width: 750px;
+            min-height: 650px;
+            text-align: center;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 32px 64px rgba(0, 0, 0, 0.1);
+            position: relative;
+            overflow: hidden;
+            animation: containerFadeIn 0.8s ease-out;
+        }
+
+        @keyframes containerFadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(30px) scale(0.95);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        .installer-container::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+        }
+
+        .luna-branding {
+            margin-bottom: 32px;
+            animation: brandingSlideIn 1s ease-out 0.3s both;
+        }
+
+        @keyframes brandingSlideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .luna-logo {
+            width: 100px;
+            height: 100px;
+            margin: 0 auto 24px;
+            background: linear-gradient(135deg, #ff6b6b, #feca57, #48dbfb, #ff9ff3);
+            background-size: 300% 300%;
+            animation: gradientShift 6s ease infinite;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2.8rem;
+            font-weight: bold;
+            color: white;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+            cursor: pointer;
+            transition: transform 0.3s ease;
+        }
+
+        .luna-logo:hover {
+            transform: scale(1.05);
+        }
+
+        @keyframes gradientShift {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+
+        .main-title {
+            font-size: 3.2rem;
+            font-weight: 300;
+            margin-bottom: 8px;
+            background: linear-gradient(135deg, #ffffff, #f0f8ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            letter-spacing: -1px;
+        }
+
+        .subtitle {
+            font-size: 1.3rem;
+            opacity: 0.9;
+            margin-bottom: 40px;
+            font-weight: 300;
+        }
+
+        .version-info {
+            font-size: 0.9rem;
+            opacity: 0.7;
+            margin-top: 8px;
+        }
+
+        .installation-step {
+            display: none;
+            animation: stepFadeIn 0.5s ease-in-out;
+        }
+
+        .installation-step.active {
+            display: block;
+        }
+
+        @keyframes stepFadeIn {
+            from { 
+                opacity: 0; 
+                transform: translateY(20px); 
+            }
+            to { 
+                opacity: 1; 
+                transform: translateY(0); 
+            }
+        }
+
+        .step-content {
+            text-align: left;
+            margin: 32px 0;
+        }
+
+        .step-content h3 {
+            font-size: 2rem;
+            margin-bottom: 16px;
+            text-align: center;
+            font-weight: 400;
+        }
+
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 18px;
+            margin: 28px 0;
+        }
+
+        .feature-card {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 18px;
+            padding: 24px;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            transition: all 0.3s ease;
+            text-align: center;
+            cursor: pointer;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-6px);
+            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.2);
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        .feature-icon {
+            font-size: 2.2rem;
+            margin-bottom: 14px;
+            display: block;
+            filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
+        }
+
+        .feature-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: #ffffff;
+        }
+
+        .feature-description {
+            font-size: 0.95rem;
+            opacity: 0.85;
+            line-height: 1.5;
+        }
+
+        .requirements-list {
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 18px;
+            padding: 28px;
+            margin: 28px 0;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .requirement-item {
+            display: flex;
+            align-items: center;
+            margin: 18px 0;
+            padding: 16px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 14px;
+            transition: all 0.3s ease;
+        }
+
+        .requirement-item:hover {
+            background: rgba(255, 255, 255, 0.1);
+            transform: translateX(4px);
+        }
+
+        .requirement-status {
+            font-size: 1.6rem;
+            margin-right: 18px;
+            min-width: 36px;
+            text-align: center;
+        }
+
+        .requirement-content {
+            flex: 1;
+            text-align: left;
+        }
+
+        .requirement-name {
+            font-weight: 600;
+            margin-bottom: 6px;
+            font-size: 1.1rem;
+        }
+
+        .requirement-details {
+            font-size: 0.95rem;
+            opacity: 0.8;
+            line-height: 1.4;
+        }
+
+        .progress-section {
+            margin: 36px 0;
+        }
+
+        .progress-container {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 14px;
+            height: 14px;
+            overflow: hidden;
+            margin: 24px 0;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            position: relative;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #ff6b6b, #feca57, #48dbfb);
+            background-size: 200% 100%;
+            animation: progressGlow 2s ease infinite;
+            width: 0%;
+            transition: width 0.8s ease;
+            border-radius: 14px;
+            position: relative;
+        }
+
+        .progress-bar::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+            animation: progressShine 2s ease infinite;
+        }
+
+        @keyframes progressGlow {
+            0% { background-position: -200% 0; }
+            100% { background-position: 200% 0; }
+        }
+
+        @keyframes progressShine {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+
+        .progress-text {
+            font-size: 1.1rem;
+            margin-top: 14px;
+            font-weight: 500;
+        }
+
+        .progress-details {
+            font-size: 0.95rem;
+            opacity: 0.8;
+            margin-top: 10px;
+            font-style: italic;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #ff6b6b, #feca57);
+            border: none;
+            padding: 16px 36px;
+            border-radius: 36px;
+            color: white;
+            font-size: 1.1rem;
+            font-weight: 600;
+            cursor: pointer;
+            margin: 14px 10px;
+            transition: all 0.3s ease;
+            box-shadow: 0 8px 25px rgba(255, 107, 107, 0.3);
+            min-width: 160px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+            transition: left 0.5s;
+        }
+
+        .btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 12px 30px rgba(255, 107, 107, 0.4);
+        }
+
+        .btn:hover::before {
+            left: 100%;
+        }
+
+        .btn:active {
+            transform: translateY(-1px);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+            box-shadow: 0 8px 25px rgba(255, 107, 107, 0.2);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.15);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            box-shadow: 0 8px 25px rgba(255, 255, 255, 0.1);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.2);
+            box-shadow: 0 12px 30px rgba(255, 255, 255, 0.15);
+        }
+
+        .btn-warning {
+            background: linear-gradient(135deg, #ff9800, #ffc107);
+            box-shadow: 0 8px 25px rgba(255, 152, 0, 0.3);
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #4caf50, #8bc34a);
+            box-shadow: 0 8px 25px rgba(76, 175, 80, 0.3);
+        }
+
+        .input-group {
+            margin: 28px 0;
+        }
+
+        .install-path-input {
+            width: 100%;
+            padding: 16px 22px;
+            border-radius: 18px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            font-size: 1rem;
+            margin-bottom: 14px;
+            backdrop-filter: blur(10px);
+            transition: all 0.3s ease;
+        }
+
+        .install-path-input::placeholder {
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        .install-path-input:focus {
+            outline: none;
+            border-color: rgba(255, 255, 255, 0.5);
+            background: rgba(255, 255, 255, 0.15);
+            box-shadow: 0 0 20px rgba(255, 255, 255, 0.1);
+        }
+
+        .success-section {
+            text-align: center;
+        }
+
+        .success-icon {
+            font-size: 5.5rem;
+            margin-bottom: 28px;
+            animation: successBounce 2s infinite;
+            filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.2));
+        }
+
+        @keyframes successBounce {
+            0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
+            40% { transform: translateY(-12px); }
+            60% { transform: translateY(-6px); }
+        }
+
+        .error-section {
+            background: rgba(255, 107, 107, 0.2);
+            border: 1px solid rgba(255, 107, 107, 0.4);
+            border-radius: 18px;
+            padding: 28px;
+            margin: 28px 0;
+        }
+
+        .error-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 14px;
+            color: #ffebee;
+        }
+
+        .error-message {
+            font-size: 1.05rem;
+            line-height: 1.6;
+            opacity: 0.9;
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 26px;
+            height: 26px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: #ffffff;
+            animation: spin 1s ease-in-out infinite;
+            margin-right: 14px;
+            vertical-align: middle;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .button-group {
+            margin-top: 36px;
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 14px;
+        }
+
+        .info-box {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 18px;
+            padding: 24px;
+            margin: 24px 0;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            text-align: left;
+        }
+
+        .info-box h4 {
+            margin-bottom: 14px;
+            font-size: 1.3rem;
+            text-align: center;
+        }
+
+        .info-box ul {
+            padding-left: 24px;
+            line-height: 1.7;
+        }
+
+        .info-box li {
+            margin: 8px 0;
+        }
+
+        .info-box p {
+            line-height: 1.6;
+            opacity: 0.9;
+            text-align: center;
+        }
+
+        .platform-info {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            font-size: 0.8rem;
+            opacity: 0.6;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 6px 12px;
+            border-radius: 8px;
+        }
+
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            color: white;
+            padding: 16px 22px;
+            border-radius: 14px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            z-index: 1000;
+            animation: slideInRight 0.3s ease;
+            max-width: 320px;
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
+        }
+
+        @keyframes slideInRight {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        /* Custom scrollbar */
+        .requirements-list::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .requirements-list::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+        }
+
+        .requirements-list::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 4px;
+        }
+
+        .requirements-list::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.5);
+        }
+
+        /* Responsive design */
+        @media (max-width: 768px) {
+            .installer-container {
+                padding: 36px 28px;
+                margin: 16px;
+                max-width: 90%;
+            }
+            
+            .main-title {
+                font-size: 2.4rem;
+            }
+            
+            .feature-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .button-group {
+                flex-direction: column;
+                align-items: center;
+            }
+            
+            .btn {
+                width: 100%;
+                max-width: 320px;
+            }
+            
+            .luna-logo {
+                width: 80px;
+                height: 80px;
+                font-size: 2.2rem;
+            }
+        }
+
+        /* Windows-specific enhancements */
+        .windows .btn {
+            border-radius: 2px;
+        }
+
+        .windows .installer-container {
+            border-radius: 8px;
+        }
+
+        .windows .feature-card {
+            border-radius: 4px;
+        }
+
+        .windows .requirements-list {
+            border-radius: 4px;
+        }
+
+        /* Focus styles for accessibility */
+        .btn:focus,
+        .install-path-input:focus {
+            outline: 2px solid rgba(255, 255, 255, 0.8);
+            outline-offset: 2px;
+        }
+    </style>
+</head>
+<body class="windows">
+    <div class="installer-container">
+        <div class="platform-info" id="platformInfo">Windows</div>
+        
+        <!-- Luna Branding -->
+        <div class="luna-branding">
+            <div class="luna-logo" title="Luna Agent">🌙</div>
+            <h1 class="main-title">Luna Agent</h1>
+            <p class="subtitle">Your AI-Powered Digital Assistant</p>
+            <div class="version-info">Installer v1.0.0</div>
+        </div>
+
+        <!-- Welcome Step -->
+        <div class="installation-step active" id="step-welcome">
+            <div class="step-content">
+                <h3>🌟 Welcome to the Future of Automation</h3>
+                <p style="text-align: center; margin-bottom: 32px; font-size: 1.15rem; line-height: 1.6;">
+                    Luna is an intelligent AI agent that automates complex tasks on your computer. 
+                    She runs in a secure virtual environment, protecting your system while providing powerful automation capabilities.
+                </p>
+                
+                <div class="feature-grid">
+                    <div class="feature-card" title="Automate repetitive tasks with AI">
+                        <div class="feature-icon">🤖</div>
+                        <div class="feature-title">Intelligent Automation</div>
+                        <div class="feature-description">Automate repetitive tasks with AI-powered decision making and learning</div>
+                    </div>
+                    <div class="feature-card" title="Complete system protection through VM isolation">
+                        <div class="feature-icon">🔒</div>
+                        <div class="feature-title">Secure Environment</div>
+                        <div class="feature-description">Runs in isolated VM for complete system protection and safety</div>
+                    </div>
+                    <div class="feature-card" title="No technical knowledge required">
+                        <div class="feature-icon">⚡</div>
+                        <div class="feature-title">One-Click Setup</div>
+                        <div class="feature-description">Easy installation with zero technical knowledge required</div>
+                    </div>
+                    <div class="feature-card" title="Learns and improves over time">
+                        <div class="feature-icon">🎯</div>
+                        <div class="feature-title">Task Learning</div>
+                        <div class="feature-description">Learns from your preferences and improves performance over time</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="button-group">
+                <button class="btn" onclick="checkRequirements()" title="Start the installation process">
+                    <span class="loading-spinner" id="welcome-spinner" style="display: none;"></span>
+                    🚀 Get Started
+                </button>
+            </div>
+        </div>
+
+        <!-- System Requirements Step -->
+        <div class="installation-step" id="step-requirements">
+            <div class="step-content">
+                <h3>🔍 System Compatibility Check</h3>
+                <div class="requirements-list" id="requirements-container">
+                    <div style="text-align: center; padding: 36px;">
+                        <div class="loading-spinner"></div>
+                        Checking your system compatibility...
+                    </div>
+                </div>
+            </div>
+            
+            <div class="button-group">
+                <button class="btn" onclick="proceedToInstall()" id="requirements-continue-btn" disabled title="Continue to installation">
+                    Continue Installation
+                </button>
+                <button class="btn btn-secondary" onclick="goToStep('step-welcome')" title="Go back to welcome screen">Back</button>
+            </div>
+        </div>
+
+        <!-- Installation Path Step -->
+        <div class="installation-step" id="step-path">
+            <div class="step-content">
+                <h3>📁 Choose Installation Location</h3>
+                <p style="text-align: center; margin-bottom: 28px; font-size: 1.1rem;">
+                    Select where you'd like to install Luna Agent on your Windows system:
+                </p>
+                
+                <div class="input-group">
+                    <input type="text" class="install-path-input" id="installPath" 
+                           placeholder="Select installation directory..." readonly
+                           title="Installation directory path">
+                    <button class="btn btn-secondary" onclick="browseInstallPath()" style="width: 100%;" title="Browse for installation directory">
+                        📁 Browse Directories
+                    </button>
+                </div>
+                
+                <div class="info-box">
+                    <h4>📋 Installation Includes:</h4>
+                    <ul>
+                        <li>Luna AI Agent application and virtual machine</li>
+                        <li>Secure isolated environment with VirtualBox</li>
+                        <li>Desktop shortcuts and Start Menu integration</li>
+                        <li>Automatic updates and security patches</li>
+                        <li>Windows services for background operation</li>
+                        <li>Complete uninstaller for clean removal</li>
+                    </ul>
+                    <p style="margin-top: 16px;"><strong>💾 Space Required:</strong> Approximately 2GB</p>
+                </div>
+            </div>
+            
+            <div class="button-group">
+                <button class="btn" onclick="startInstallation()" id="start-install-btn" disabled title="Start Luna installation">
+                    🚀 Install Luna Now
+                </button>
+                <button class="btn btn-secondary" onclick="goToStep('step-requirements')" title="Go back to system check">Back</button>
+            </div>
+        </div>
+
+        <!-- Installation Progress Step -->
+        <div class="installation-step" id="step-installing">
+            <div class="step-content">
+                <h3>⚡ Installing Luna Agent</h3>
+                
+                <div class="progress-section">
+                    <div class="progress-container">
+                        <div class="progress-bar" id="progress-bar"></div>
+                    </div>
+                    <div class="progress-text" id="progress-text">Preparing installation...</div>
+                    <div class="progress-details" id="progress-details">This may take a few minutes</div>
+                </div>
+                
+                <div class="info-box">
+                    <h4>🔧 Windows Installation Process:</h4>
+                    <ul>
+                        <li>Setting up the secure virtual machine environment</li>
+                        <li>Installing Luna's AI processing components</li>
+                        <li>Configuring Windows services and integration</li>
+                        <li>Creating desktop shortcuts and Start Menu entries</li>
+                        <li>Setting up Windows firewall and security rules</li>
+                        <li>Running system tests and performance optimization</li>
+                    </ul>
+                    <p style="margin-top: 16px; text-align: center;">
+                        <strong>💡 Tip:</strong> You can safely minimize this window - installation will continue in the background.
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Success Step -->
+        <div class="installation-step" id="step-success">
+            <div class="step-content">
+                <div class="success-section">
+                    <div class="success-icon">🎉</div>
+                    <h3>✅ Installation Complete!</h3>
+                    <p style="font-size: 1.25rem; margin: 28px 0; line-height: 1.6;">
+                        Luna Agent has been successfully installed on your Windows system and is ready to help you automate your digital tasks.
+                    </p>
+                    
+                    <div class="info-box">
+                        <h4>🚀 What's Next?</h4>
+                        <ul>
+                            <li>✨ Launch Luna to start your first automation</li>
+                            <li>📚 Explore Luna's capabilities in the built-in tutorial</li>
+                            <li>🎯 Begin automating your most repetitive Windows tasks</li>
+                            <li>🌐 Visit our documentation for advanced features</li>
+                            <li>💬 Join our community for tips and support</li>
+                        </ul>
+                        <p style="margin-top: 16px;">
+                            <strong>🔗 Quick Access:</strong> Luna shortcuts have been added to your Desktop and Start Menu.
+                        </p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="button-group">
+                <button class="btn btn-success" onclick="launchLuna()" title="Launch Luna Agent now">
+                    🚀 Launch Luna
+                </button>
+                <button class="btn btn-secondary" onclick="closeInstaller()" title="Close the installer">
+                    ✨ Finish Installation
+                </button>
+            </div>
+        </div>
+
+        <!-- Error Step -->
+        <div class="installation-step" id="step-error">
+            <div class="step-content">
+                <h3>⚠️ Installation Issue</h3>
+                
+                <div class="error-section">
+                    <div class="error-title">❌ Installation Error</div>
+                    <div class="error-message" id="error-details">
+                        An unexpected error occurred during installation.
+                    </div>
+                </div>
+                
+                <div class="info-box">
+                    <h4>💡 Windows Troubleshooting Tips:</h4>
+                    <ul>
+                        <li>Ensure you have administrator privileges</li>
+                        <li>Check that you have sufficient disk space (10GB+)</li>
+                        <li>Temporarily disable Windows Defender or antivirus software</li>
+                        <li>Close other applications that might interfere</li>
+                        <li>Ensure Windows virtualization features are enabled</li>
+                        <li>Restart your computer and try again</li>
+                        <li>Check Windows Update for latest system updates</li>
+                    </ul>
+                    <p style="margin-top: 16px; text-align: center;">
+                        <strong>🆘 Need Help?</strong> Visit our <a href="#" onclick="openExternalLink('https://support.luna-agent.com')" style="color: #feca57;">support center</a> for detailed troubleshooting.
+                    </p>
+                </div>
+            </div>
+            
+            <div class="button-group">
+                <button class="btn btn-warning" onclick="retryInstallation()" title="Try installation again">
+                    🔄 Try Again
+                </button>
+                <button class="btn btn-secondary" onclick="goToStep('step-welcome')" title="Start over from the beginning">
+                    🏠 Start Over
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="renderer.js"></script>
+</body>
+</html>

@@ -1,0 +1,156 @@
+{
+  "name": "luna-agent-installer",
+  "version": "1.0.0",
+  "description": "Luna AI Agent - One-Click Virtual Machine Installer",
+  "main": "src/main.js",
+  "homepage": "https://luna-agent.com",
+  "author": "Luna Team <hello@luna-agent.com>",
+  "license": "MIT",
+  "keywords": ["ai", "agent", "automation", "virtual-machine", "luna"],
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build": "electron-builder",
+    "build-win": "electron-builder --win",
+    "build-win32": "electron-builder --win --ia32",
+    "build-win64": "electron-builder --win --x64",
+    "build-linux": "electron-builder --linux",
+    "build-mac": "electron-builder --mac",
+    "build-all": "electron-builder --win --linux --mac",
+    "pack": "electron-builder --dir",
+    "pack-win": "electron-builder --win --dir",
+    "dist": "npm run build",
+    "clean": "rimraf dist build",
+    "test": "echo \"Luna Installer ready for testing\"",
+    "verify": "node scripts/verify-build.js",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "build": {
+    "appId": "com.luna.agent.installer",
+    "productName": "Luna Agent Installer",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "vm-assets/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "vm-assets",
+        "to": "vm-assets",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        },
+        {
+          "target": "zip",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "assets/luna-icon.ico",
+      "requestedExecutionLevel": "asInvoker",
+      "artifactName": "Luna-Agent-Installer-${version}-Windows-${arch}.${ext}",
+      "publisherName": "Luna Team",
+      "fileAssociations": [
+        {
+          "ext": "luna",
+          "name": "Luna Agent Configuration",
+          "description": "Luna Agent Configuration File"
+        }
+      ]
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": ["x64"]
+        },
+        {
+          "target": "deb",
+          "arch": ["x64"]
+        },
+        {
+          "target": "rpm",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "assets/luna-icon.png",
+      "category": "Utility",
+      "artifactName": "Luna-Agent-Installer-${version}-Linux-${arch}.${ext}",
+      "desktop": {
+        "Name": "Luna Agent Installer",
+        "Comment": "Install Luna AI Agent",
+        "Categories": "Utility;System;"
+      }
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["x64", "arm64"]
+        }
+      ],
+      "icon": "assets/luna-icon.icns",
+      "category": "public.app-category.productivity",
+      "artifactName": "Luna-Agent-Installer-${version}-macOS-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Luna Agent Installer",
+      "runAfterFinish": false,
+      "installerIcon": "assets/luna-icon.ico",
+      "uninstallerIcon": "assets/luna-icon.ico",
+      "installerHeaderIcon": "assets/luna-icon.ico",
+      "installerSidebar": "assets/luna-installer-sidebar.bmp",
+      "uninstallerSidebar": "assets/luna-uninstaller-sidebar.bmp",
+      "include": "build/installer.nsh",
+      "guid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+    },
+    "portable": {
+      "artifactName": "Luna-Agent-Installer-${version}-Windows-${arch}-Portable.${ext}"
+    },
+    "dmg": {
+      "title": "Luna Agent Installer",
+      "backgroundColor": "#667eea",
+      "window": {
+        "width": 600,
+        "height": 400
+      }
+    },
+    "compression": "maximum",
+    "removePackageScripts": true,
+    "electronDownload": {
+      "cache": "./cache"
+    }
+  },
+  "devDependencies": {
+    "electron": "^25.9.0",
+    "electron-builder": "^24.6.4",
+    "rimraf": "^5.0.5"
+  },
+  "dependencies": {
+    "axios": "^1.6.2",
+    "extract-zip": "^2.0.1",
+    "node-7z": "^3.0.0",
+    "systeminformation": "^5.21.20",
+    "child_process": "^1.0.2"
+  }
+}

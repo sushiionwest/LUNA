@@ -1,0 +1,24 @@
+[Unit]
+Description=Luna AI Agent Service
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=luna
+Group=luna
+WorkingDirectory=/opt/luna-agent
+Environment=DISPLAY=:99
+Environment=LUNA_HOME=/opt/luna-agent
+Environment=PYTHONPATH=/opt/luna-agent
+ExecStartPre=/bin/bash -c 'Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset &'
+ExecStart=/usr/bin/python3 /opt/luna-agent/main.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+KillMode=mixed
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

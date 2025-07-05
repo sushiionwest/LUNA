@@ -1,0 +1,44 @@
+{
+  "name": "Luna-Agent-VM",
+  "version": "1.0.0",
+  "description": "Luna AI Agent Virtual Machine - Ubuntu-based automation environment",
+  "base_os": "ubuntu-22.04-minimal",
+  "architecture": "x86_64",
+  "resources": {
+    "memory_mb": 2048,
+    "storage_gb": 20,
+    "cpu_cores": 2,
+    "network": "NAT"
+  },
+  "features": {
+    "automation_tools": true,
+    "security_hardening": true,
+    "remote_access": true,
+    "auto_updates": false,
+    "telemetry": "minimal",
+    "gui": "headless"
+  },
+  "software": [
+    "python3",
+    "nodejs",
+    "docker",
+    "chrome-headless",
+    "luna-agent-core",
+    "selenium",
+    "playwright",
+    "opencv-python"
+  ],
+  "ports": {
+    "luna_api": 8080,
+    "luna_ui": 3000,
+    "ssh": 22222,
+    "vnc": 5900
+  },
+  "user_accounts": {
+    "luna": {
+      "sudo": true,
+      "shell": "/bin/bash",
+      "groups": ["docker", "sudo"]
+    }
+  }
+}
