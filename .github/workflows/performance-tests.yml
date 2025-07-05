@@ -1,0 +1,345 @@
+name: Performance & Resource Contention Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'autonomous-agent/**'
+      - 'luna-agent/**'
+      - 'performance-tests/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'autonomous-agent/**'
+      - 'luna-agent/**'
+      - 'performance-tests/**'
+  schedule:
+    # Run nightly at 2 AM UTC to catch performance regressions
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      test_duration:
+        description: 'Test duration in minutes'
+        required: false
+        default: '5'
+      load_intensity:
+        description: 'Load intensity (low, medium, high)'
+        required: false
+        default: 'medium'
+
+env:
+  NODE_VERSION: '20'
+  PERFORMANCE_REPORT_PATH: './performance-reports'
+
+jobs:
+  performance-baseline:
+    name: Performance Baseline Tests
+    runs-on: windows-latest
+    timeout-minutes: 30
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        
+    - name: Setup Bun
+      uses: oven-sh/setup-bun@v1
+      with:
+        bun-version: latest
+        
+    - name: Install k6
+      run: |
+        choco install k6 -y
+        k6 --version
+        
+    - name: Install dependencies
+      run: |
+        cd autonomous-agent
+        bun install
+        
+    - name: Build Luna Agent
+      run: |
+        cd autonomous-agent
+        bun run build
+        
+    - name: Create performance reports directory
+      run: |
+        New-Item -ItemType Directory -Force -Path "${{ env.PERFORMANCE_REPORT_PATH }}"
+        
+    - name: Start Luna Agent (Background)
+      run: |
+        cd autonomous-agent
+        Start-Process -FilePath "bun" -ArgumentList "run", "server" -WindowStyle Hidden
+        Start-Sleep -Seconds 10
+        
+        # Verify agent is running
+        $response = Invoke-WebRequest -Uri "http://localhost:3000/health" -UseBasicParsing
+        if ($response.StatusCode -ne 200) {
+          throw "Luna Agent failed to start"
+        }
+        Write-Host "Luna Agent is running"
+      shell: pwsh
+      
+    - name: Start Performance Monitor (Background)
+      run: |
+        $monitorPath = "performance-tests/monitor-luna-performance.ps1"
+        $reportPath = "${{ env.PERFORMANCE_REPORT_PATH }}/performance-monitor.json"
+        
+        Start-Process -FilePath "pwsh" -ArgumentList "-File", $monitorPath, "-ReportPath", $reportPath, "-Duration", "600" -WindowStyle Hidden -PassThru | Out-File -FilePath "monitor-pid.txt"
+        Start-Sleep -Seconds 5
+        Write-Host "Performance monitor started"
+      shell: pwsh
+      
+    - name: Run Performance Tests
+      run: |
+        $testDuration = "${{ github.event.inputs.test_duration || '5' }}"
+        $loadIntensity = "${{ github.event.inputs.load_intensity || 'medium' }}"
+        
+        # Set k6 options based on load intensity
+        switch ($loadIntensity) {
+          "low" { 
+            $env:K6_VUS = "5"
+            $env:K6_DURATION = "${testDuration}m"
+          }
+          "medium" { 
+            $env:K6_VUS = "10"
+            $env:K6_DURATION = "${testDuration}m"
+          }
+          "high" { 
+            $env:K6_VUS = "20"
+            $env:K6_DURATION = "${testDuration}m"
+          }
+        }
+        
+        Write-Host "Running k6 tests with VUS=$env:K6_VUS, DURATION=$env:K6_DURATION"
+        
+        k6 run performance-tests/k6-performance-test.js `
+          --out json="${{ env.PERFORMANCE_REPORT_PATH }}/k6-results.json" `
+          --summary-export="${{ env.PERFORMANCE_REPORT_PATH }}/k6-summary.json"
+      shell: pwsh
+      
+    - name: Stop Performance Monitor
+      run: |
+        if (Test-Path "monitor-pid.txt") {
+          $monitorPid = Get-Content "monitor-pid.txt" | Select-Object -First 1
+          if ($monitorPid) {
+            try {
+              Stop-Process -Id $monitorPid -Force -ErrorAction SilentlyContinue
+              Write-Host "Performance monitor stopped"
+            } catch {
+              Write-Host "Monitor process already stopped"
+            }
+          }
+        }
+        
+        # Wait for final report generation
+        Start-Sleep -Seconds 5
+      shell: pwsh
+      
+    - name: Analyze Performance Results
+      run: |
+        $k6SummaryPath = "${{ env.PERFORMANCE_REPORT_PATH }}/k6-summary.json"
+        $monitorReportPath = "${{ env.PERFORMANCE_REPORT_PATH }}/performance-monitor.json"
+        $analysisPath = "${{ env.PERFORMANCE_REPORT_PATH }}/performance-analysis.json"
+        
+        # Parse k6 results
+        if (Test-Path $k6SummaryPath) {
+          $k6Results = Get-Content $k6SummaryPath | ConvertFrom-Json
+          Write-Host "K6 Test Results:"
+          Write-Host "- Iterations: $($k6Results.metrics.iterations.values.count)"
+          Write-Host "- Avg Response Time: $($k6Results.metrics.http_req_duration.values.avg)ms"
+          Write-Host "- Error Rate: $($k6Results.metrics.http_req_failed.values.rate * 100)%"
+        }
+        
+        # Parse performance monitor results
+        if (Test-Path $monitorReportPath) {
+          $monitorResults = Get-Content $monitorReportPath | ConvertFrom-Json
+          Write-Host "Performance Monitor Results:"
+          Write-Host "- Average CPU: $($monitorResults.summary.averageCpuUsage)%"
+          Write-Host "- Max Memory: $($monitorResults.summary.maxMemoryUsageMB)MB"
+          Write-Host "- Threshold Violations: $($monitorResults.summary.thresholdViolations)"
+          
+          # Check if performance thresholds were exceeded
+          if ($monitorResults.summary.thresholdViolations -gt 0) {
+            Write-Host "::error::Performance thresholds were exceeded!"
+            exit 1
+          }
+          
+          if ($monitorResults.summary.averageCpuUsage -gt 30) {
+            Write-Host "::error::Average CPU usage ($($monitorResults.summary.averageCpuUsage)%) exceeded 30% threshold!"
+            exit 1
+          }
+        }
+        
+        # Generate combined analysis
+        $analysis = @{
+          timestamp = Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ"
+          test_config = @{
+            duration = "${{ github.event.inputs.test_duration || '5' }}"
+            load_intensity = "${{ github.event.inputs.load_intensity || 'medium' }}"
+          }
+          results = @{
+            k6_summary = if (Test-Path $k6SummaryPath) { Get-Content $k6SummaryPath | ConvertFrom-Json } else { $null }
+            monitor_summary = if (Test-Path $monitorReportPath) { (Get-Content $monitorReportPath | ConvertFrom-Json).summary } else { $null }
+          }
+          status = "PASSED"
+        }
+        
+        $analysis | ConvertTo-Json -Depth 10 | Set-Content $analysisPath
+        Write-Host "Performance analysis saved to $analysisPath"
+      shell: pwsh
+      
+    - name: Upload Performance Reports
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: performance-reports-${{ github.run_id }}
+        path: ${{ env.PERFORMANCE_REPORT_PATH }}
+        retention-days: 30
+        
+    - name: Comment Performance Results on PR
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const path = '${{ env.PERFORMANCE_REPORT_PATH }}/performance-analysis.json';
+          
+          if (fs.existsSync(path)) {
+            const analysis = JSON.parse(fs.readFileSync(path, 'utf8'));
+            const k6 = analysis.results.k6_summary?.metrics || {};
+            const monitor = analysis.results.monitor_summary || {};
+            
+            const comment = `## 🚀 Performance Test Results
+            
+            **Test Configuration:**
+            - Duration: ${analysis.test_config.duration} minutes
+            - Load Intensity: ${analysis.test_config.load_intensity}
+            
+            **K6 Load Test Results:**
+            - Total Requests: ${k6.http_reqs?.values?.count || 'N/A'}
+            - Average Response Time: ${k6.http_req_duration?.values?.avg?.toFixed(2) || 'N/A'}ms
+            - Error Rate: ${((k6.http_req_failed?.values?.rate || 0) * 100).toFixed(2)}%
+            
+            **System Performance:**
+            - Average CPU Usage: ${monitor.averageCpuUsage?.toFixed(2) || 'N/A'}%
+            - Peak Memory Usage: ${monitor.maxMemoryUsageMB?.toFixed(2) || 'N/A'}MB
+            - Threshold Violations: ${monitor.thresholdViolations || 0}
+            
+            **Status:** ${analysis.status} ✅
+            
+            *Thresholds: CPU < 30%, Memory reasonable, Error rate < 5%*
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+          }
+
+  stress-test:
+    name: Stress Test & Resource Limits
+    runs-on: windows-latest
+    needs: performance-baseline
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 45
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js & Dependencies
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        
+    - name: Setup Bun
+      uses: oven-sh/setup-bun@v1
+      with:
+        bun-version: latest
+        
+    - name: Install k6
+      run: choco install k6 -y
+      
+    - name: Install dependencies and build
+      run: |
+        cd autonomous-agent
+        bun install
+        bun run build
+        
+    - name: Create reports directory
+      run: New-Item -ItemType Directory -Force -Path "${{ env.PERFORMANCE_REPORT_PATH }}"
+      
+    - name: Run Stress Test
+      run: |
+        cd autonomous-agent
+        Start-Process -FilePath "bun" -ArgumentList "run", "server" -WindowStyle Hidden
+        Start-Sleep -Seconds 10
+        
+        # Start intensive monitoring
+        Start-Process -FilePath "pwsh" -ArgumentList "-File", "../performance-tests/monitor-luna-performance.ps1", "-ReportPath", "../${{ env.PERFORMANCE_REPORT_PATH }}/stress-monitor.json", "-Duration", "1200" -WindowStyle Hidden
+        
+        # Run stress test with high load
+        $env:K6_VUS = "50"
+        $env:K6_DURATION = "10m"
+        
+        k6 run ../performance-tests/k6-performance-test.js `
+          --out json="../${{ env.PERFORMANCE_REPORT_PATH }}/stress-k6-results.json" `
+          --summary-export="../${{ env.PERFORMANCE_REPORT_PATH }}/stress-k6-summary.json"
+      shell: pwsh
+      
+    - name: Validate Stress Test Results
+      run: |
+        $summaryPath = "${{ env.PERFORMANCE_REPORT_PATH }}/stress-k6-summary.json"
+        $monitorPath = "${{ env.PERFORMANCE_REPORT_PATH }}/stress-monitor.json"
+        
+        if (Test-Path $summaryPath) {
+          $results = Get-Content $summaryPath | ConvertFrom-Json
+          $errorRate = $results.metrics.http_req_failed.values.rate * 100
+          
+          Write-Host "Stress Test Results:"
+          Write-Host "- Error Rate: $errorRate%"
+          Write-Host "- Avg Response Time: $($results.metrics.http_req_duration.values.avg)ms"
+          
+          if ($errorRate -gt 10) {
+            Write-Host "::error::Error rate ($errorRate%) too high under stress!"
+            exit 1
+          }
+        }
+        
+        if (Test-Path $monitorPath) {
+          $monitor = Get-Content $monitorPath | ConvertFrom-Json
+          Write-Host "System survived stress test with $($monitor.summary.thresholdViolations) violations"
+        }
+      shell: pwsh
+      
+    - name: Upload Stress Test Reports
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: stress-test-reports-${{ github.run_id }}
+        path: ${{ env.PERFORMANCE_REPORT_PATH }}
+        retention-days: 30
+
+  performance-regression:
+    name: Performance Regression Detection
+    runs-on: windows-latest
+    if: github.event_name == 'pull_request'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Download baseline performance data
+      run: |
+        # In a real scenario, this would fetch baseline data from a previous successful run
+        # For now, we'll create a placeholder
+        Write-Host "Performance regression detection would compare against baseline data"
+        Write-Host "::notice::Implement baseline comparison with artifacts from main branch"
+      shell: pwsh

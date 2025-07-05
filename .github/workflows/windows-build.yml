@@ -1,0 +1,488 @@
+name: Windows Build & Distribution
+
+on:
+  push:
+    branches: [ main, develop ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  PRODUCT_NAME: "Luna Agent"
+  COMPANY_NAME: "Luna Team"
+  SIGNING_CERT_NAME: "Luna Development Certificate"
+
+jobs:
+  windows-build:
+    runs-on: windows-2022
+    strategy:
+      matrix:
+        os: [windows-2019, windows-2022]
+        architecture: [x64, arm64]
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: 'autonomous-agent/package-lock.json'
+
+    - name: Setup Bun
+      uses: oven-sh/setup-bun@v1
+      with:
+        bun-version: latest
+
+    - name: Install dependencies
+      working-directory: autonomous-agent
+      run: bun install
+
+    - name: Type checking
+      working-directory: autonomous-agent
+      run: bun run typecheck
+
+    - name: Lint code
+      working-directory: autonomous-agent
+      run: bun run lint
+
+    - name: Build application
+      working-directory: autonomous-agent
+      run: bun run build
+
+    - name: Setup Windows SDK
+      uses: microsoft/setup-msbuild@v2
+
+    - name: Install WiX Toolset
+      run: |
+        Invoke-WebRequest -Uri "https://github.com/wixtoolset/wix3/releases/download/wix3112rtm/wix311.exe" -OutFile "wix311.exe"
+        Start-Process -FilePath "wix311.exe" -ArgumentList "/quiet" -Wait
+
+    - name: Setup Squirrel.Windows
+      run: |
+        npm install -g electron-winstaller
+
+    - name: Configure Azure Key Vault for Code Signing
+      if: github.event_name != 'pull_request'
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Retrieve signing certificate
+      if: github.event_name != 'pull_request'
+      id: cert
+      run: |
+        # Download certificate from Azure Key Vault
+        az keyvault secret download --vault-name ${{ secrets.AZURE_KEYVAULT_NAME }} --name signing-cert --file cert.p12
+        echo "cert-path=cert.p12" >> $env:GITHUB_OUTPUT
+
+    - name: Prepare application for packaging
+      run: |
+        # Create distribution directory
+        New-Item -ItemType Directory -Force -Path "dist-windows"
+        
+        # Copy built application
+        Copy-Item -Recurse -Path "autonomous-agent/dist/*" -Destination "dist-windows/"
+        
+        # Copy Node.js runtime (for standalone executable)
+        Copy-Item -Recurse -Path "autonomous-agent/node_modules" -Destination "dist-windows/"
+        
+        # Create launcher script
+        @"
+        @echo off
+        cd /d "%~dp0"
+        node src/server/index.js
+        "@ | Out-File -FilePath "dist-windows/luna-agent.bat" -Encoding ASCII
+
+    - name: Create version info
+      id: version
+      run: |
+        $version = if ($env:GITHUB_REF -match "refs/tags/v(.*)") { $matches[1] } else { "1.0.0-dev.$env:GITHUB_RUN_NUMBER" }
+        echo "version=$version" >> $env:GITHUB_OUTPUT
+        
+        # Create version.json for auto-updater
+        @{
+          version = $version
+          releaseDate = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ")
+          downloadUrl = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/v$version/luna-agent-setup-$version.exe"
+          sha256 = ""
+        } | ConvertTo-Json | Out-File -FilePath "dist-windows/version.json" -Encoding UTF8
+
+    - name: Build MSI installer
+      run: |
+        # Create WiX source file
+        @"
+        <?xml version="1.0" encoding="UTF-8"?>
+        <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+          <Product Id="*" Name="${{ env.PRODUCT_NAME }}" Language="1033" Version="${{ steps.version.outputs.version }}" 
+                   Manufacturer="${{ env.COMPANY_NAME }}" UpgradeCode="12345678-1234-1234-1234-123456789ABC">
+            <Package InstallerVersion="200" Compressed="yes" InstallScope="perMachine" />
+            
+            <MajorUpgrade DowngradeErrorMessage="A newer version of ${{ env.PRODUCT_NAME }} is already installed." />
+            <MediaTemplate EmbedCab="yes" />
+            
+            <Feature Id="ProductFeature" Title="Luna Agent" Level="1">
+              <ComponentGroupRef Id="ProductComponents" />
+            </Feature>
+            
+            <Directory Id="TARGETDIR" Name="SourceDir">
+              <Directory Id="ProgramFiles64Folder">
+                <Directory Id="INSTALLFOLDER" Name="Luna Agent" />
+              </Directory>
+              <Directory Id="ProgramMenuFolder">
+                <Directory Id="ApplicationProgramsFolder" Name="Luna Agent"/>
+              </Directory>
+              <Directory Id="DesktopFolder" Name="Desktop" />
+            </Directory>
+            
+            <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
+              <Component Id="LunaExecutable" Guid="*">
+                <File Id="LunaAgentBat" Source="dist-windows/luna-agent.bat" KeyPath="yes">
+                  <Shortcut Id="StartMenuShortcut" Directory="ApplicationProgramsFolder" 
+                           Name="Luna Agent" WorkingDirectory="INSTALLFOLDER" Icon="LunaIcon.exe" IconIndex="0" />
+                  <Shortcut Id="DesktopShortcut" Directory="DesktopFolder" 
+                           Name="Luna Agent" WorkingDirectory="INSTALLFOLDER" Icon="LunaIcon.exe" IconIndex="0" />
+                </File>
+              </Component>
+              <Component Id="ApplicationFiles" Guid="*">
+                <File Id="MainJS" Source="dist-windows/index.html" />
+                <!-- Add more files as needed -->
+              </Component>
+            </ComponentGroup>
+            
+            <Icon Id="LunaIcon.exe" SourceFile="autonomous-agent/brand-assets/luna-icon-circular.png" />
+            <Property Id="ARPPRODUCTICON" Value="LunaIcon.exe" />
+          </Product>
+        </Wix>
+        "@ | Out-File -FilePath "installer.wxs" -Encoding UTF8
+        
+        # Build MSI
+        candle installer.wxs
+        light installer.wixobj -out "luna-agent-${{ steps.version.outputs.version }}.msi"
+
+    - name: Build NSIS installer (alternative)
+      run: |
+        # Install NSIS
+        choco install nsis -y
+        
+        # Create NSIS script
+        @"
+        !define APPNAME "Luna Agent"
+        !define COMPANYNAME "Luna Team"
+        !define DESCRIPTION "Visual AI assistant for autonomous computing"
+        !define VERSIONMAJOR 1
+        !define VERSIONMINOR 0
+        !define VERSIONBUILD 0
+        !define HELPURL "https://github.com/$env:GITHUB_REPOSITORY"
+        !define UPDATEURL "https://github.com/$env:GITHUB_REPOSITORY/releases"
+        !define ABOUTURL "https://github.com/$env:GITHUB_REPOSITORY"
+        !define INSTALLSIZE 100000
+        
+        RequestExecutionLevel admin
+        InstallDir `$PROGRAMFILES64\`${APPNAME}
+        
+        Name "`${APPNAME}"
+        outFile "luna-agent-setup-${{ steps.version.outputs.version }}.exe"
+        
+        !include LogicLib.nsh
+        
+        page directory
+        page instfiles
+        
+        section "install"
+            setOutPath `$INSTDIR
+            file /r "dist-windows\*"
+            
+            # Create uninstaller
+            writeUninstaller `$INSTDIR\uninstall.exe
+            
+            # Start Menu
+            createDirectory "`$SMPROGRAMS\`${APPNAME}"
+            createShortCut "`$SMPROGRAMS\`${APPNAME}\`${APPNAME}.lnk" "`$INSTDIR\luna-agent.bat"
+            createShortCut "`$SMPROGRAMS\`${APPNAME}\Uninstall.lnk" "`$INSTDIR\uninstall.exe"
+            
+            # Desktop shortcut
+            createShortCut "`$DESKTOP\`${APPNAME}.lnk" "`$INSTDIR\luna-agent.bat"
+            
+            # Registry information for add/remove programs
+            writeRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "DisplayName" "`${APPNAME} - `${DESCRIPTION}"
+            writeRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "UninstallString" "`$\"`$INSTDIR\uninstall.exe`$\""
+            writeRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "QuietUninstallString" "`$\"`$INSTDIR\uninstall.exe`$\" /S"
+            writeRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "InstallLocation" "`$\"`$INSTDIR`$\""
+            writeRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "DisplayIcon" "`$\"`$INSTDIR\luna-agent.bat`$\""
+            writeRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "Publisher" "`${COMPANYNAME}"
+            writeRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "HelpLink" "`${HELPURL}"
+            writeRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "URLUpdateInfo" "`${UPDATEURL}"
+            writeRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "URLInfoAbout" "`${ABOUTURL}"
+            writeRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "DisplayVersion" "${{ steps.version.outputs.version }}"
+            writeRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "VersionMajor" `${VERSIONMAJOR}
+            writeRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "VersionMinor" `${VERSIONMINOR}
+            writeRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "NoModify" 1
+            writeRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "NoRepair" 1
+            writeRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}" "EstimatedSize" `${INSTALLSIZE}
+        sectionEnd
+        
+        section "uninstall"
+            delete `$INSTDIR\uninstall.exe
+            rmDir /r `$INSTDIR
+            
+            rmDir /r "`$SMPROGRAMS\`${APPNAME}"
+            delete "`$DESKTOP\`${APPNAME}.lnk"
+            
+            deleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\`${APPNAME}"
+        sectionEnd
+        "@ | Out-File -FilePath "installer.nsi" -Encoding UTF8
+        
+        # Build NSIS installer
+        makensis installer.nsi
+
+    - name: Sign executables and installers
+      if: github.event_name != 'pull_request'
+      run: |
+        # Sign the MSI and EXE files
+        $files = @(
+          "luna-agent-${{ steps.version.outputs.version }}.msi",
+          "luna-agent-setup-${{ steps.version.outputs.version }}.exe"
+        )
+        
+        foreach ($file in $files) {
+          if (Test-Path $file) {
+            # Using Azure Code Signing (recommended for production)
+            az keyvault certificate show --vault-name ${{ secrets.AZURE_KEYVAULT_NAME }} --name ${{ env.SIGNING_CERT_NAME }} --query "cer" -o tsv | base64 -d > temp.cer
+            
+            # Sign with signtool
+            & "C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64\signtool.exe" sign `
+              /f "${{ steps.cert.outputs.cert-path }}" `
+              /p "${{ secrets.CERT_PASSWORD }}" `
+              /tr "http://timestamp.digicert.com" `
+              /td sha256 `
+              /fd sha256 `
+              /d "${{ env.PRODUCT_NAME }}" `
+              /du "https://github.com/$env:GITHUB_REPOSITORY" `
+              $file
+              
+            # Verify signature
+            & "C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64\signtool.exe" verify /pa /v $file
+          }
+        }
+
+    - name: Create Squirrel.Windows package
+      if: github.event_name != 'pull_request'
+      run: |
+        # Create Squirrel package for auto-updates
+        npm install -g electron-winstaller
+        
+        # Create package.json for Squirrel
+        @{
+          name = "luna-agent"
+          version = "${{ steps.version.outputs.version }}"
+          description = "Visual AI assistant for autonomous computing"
+          main = "luna-agent.bat"
+          author = "${{ env.COMPANY_NAME }}"
+          license = "MIT"
+        } | ConvertTo-Json | Out-File -FilePath "dist-windows/package.json" -Encoding UTF8
+        
+        # Build Squirrel package
+        electron-winstaller --input-directory "dist-windows" --output-directory "squirrel-output" --authors "${{ env.COMPANY_NAME }}" --description "Visual AI assistant for autonomous computing"
+
+    - name: Generate SHA256 checksums
+      run: |
+        $files = Get-ChildItem -Path . -Filter "*.msi", "*.exe" | Where-Object { $_.Name -match "luna-agent" }
+        $checksums = @{}
+        
+        foreach ($file in $files) {
+          $hash = Get-FileHash -Path $file.FullName -Algorithm SHA256
+          $checksums[$file.Name] = $hash.Hash
+          "$($hash.Hash)  $($file.Name)" | Out-File -FilePath "SHA256SUMS.txt" -Append -Encoding ASCII
+        }
+        
+        # Update version.json with SHA256
+        $versionJson = Get-Content "dist-windows/version.json" | ConvertFrom-Json
+        $setupFile = $files | Where-Object { $_.Name -match "setup" }
+        if ($setupFile) {
+          $versionJson.sha256 = $checksums[$setupFile.Name]
+          $versionJson | ConvertTo-Json | Out-File -FilePath "dist-windows/version.json" -Encoding UTF8
+        }
+
+    - name: Run installer smoke tests
+      run: |
+        # Test MSI installation in silent mode
+        if (Test-Path "luna-agent-${{ steps.version.outputs.version }}.msi") {
+          Write-Host "Testing MSI installer..."
+          Start-Process msiexec -ArgumentList "/i", "luna-agent-${{ steps.version.outputs.version }}.msi", "/quiet", "/norestart" -Wait
+          
+          # Verify installation
+          if (Test-Path "$env:ProgramFiles\Luna Agent\luna-agent.bat") {
+            Write-Host "✅ MSI installation successful"
+            
+            # Uninstall for cleanup
+            Start-Process msiexec -ArgumentList "/x", "luna-agent-${{ steps.version.outputs.version }}.msi", "/quiet", "/norestart" -Wait
+          } else {
+            Write-Error "❌ MSI installation failed"
+            exit 1
+          }
+        }
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-installers-${{ matrix.os }}-${{ matrix.architecture }}
+        path: |
+          *.msi
+          *.exe
+          SHA256SUMS.txt
+          dist-windows/version.json
+        retention-days: 30
+
+    - name: Upload to release (on tag)
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          luna-agent-${{ steps.version.outputs.version }}.msi
+          luna-agent-setup-${{ steps.version.outputs.version }}.exe
+          SHA256SUMS.txt
+          dist-windows/version.json
+        body: |
+          ## Luna Agent v${{ steps.version.outputs.version }}
+          
+          ### Windows Installers
+          - **MSI**: `luna-agent-${{ steps.version.outputs.version }}.msi` (recommended for enterprise)
+          - **EXE**: `luna-agent-setup-${{ steps.version.outputs.version }}.exe` (recommended for individuals)
+          
+          ### Security
+          All binaries are digitally signed with Authenticode SHA-256 certificates.
+          
+          ### Installation
+          1. Download the appropriate installer for your environment
+          2. Run as administrator for system-wide installation
+          3. Follow the installation wizard
+          
+          ### Auto-Updates
+          This version includes Squirrel.Windows auto-update support.
+        draft: false
+        prerelease: ${{ contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
+
+  security-scan:
+    runs-on: windows-2022
+    needs: windows-build
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download artifacts
+      uses: actions/download-artifact@v4
+      with:
+        pattern: windows-installers-*
+        merge-multiple: true
+
+    - name: Scan with Windows Defender
+      run: |
+        # Scan installers with Windows Defender
+        $files = Get-ChildItem -Filter "*.exe", "*.msi"
+        foreach ($file in $files) {
+          Write-Host "Scanning $($file.Name) with Windows Defender..."
+          $result = & "C:\Program Files\Windows Defender\MpCmdRun.exe" -Scan -ScanType 3 -File $file.FullName
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Windows Defender detected issues in $($file.Name)"
+            exit 1
+          }
+        }
+
+    - name: Verify code signatures
+      run: |
+        $files = Get-ChildItem -Filter "*.exe", "*.msi"
+        foreach ($file in $files) {
+          Write-Host "Verifying signature for $($file.Name)..."
+          $signature = Get-AuthenticodeSignature $file.FullName
+          if ($signature.Status -ne "Valid") {
+            Write-Error "Invalid signature for $($file.Name): $($signature.Status)"
+            exit 1
+          }
+          Write-Host "✅ Valid signature: $($signature.SignerCertificate.Subject)"
+        }
+
+  winget-manifest:
+    runs-on: windows-2022
+    needs: windows-build
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Generate WinGet manifest
+      run: |
+        $version = "${{ needs.windows-build.outputs.version }}"
+        $packageId = "LunaTeam.LunaAgent"
+        
+        # Create manifest directory
+        New-Item -ItemType Directory -Force -Path "winget-manifests"
+        
+        # Version manifest
+        @"
+        PackageIdentifier: $packageId
+        PackageVersion: $version
+        DefaultLocale: en-US
+        ManifestType: version
+        ManifestVersion: 1.4.0
+        "@ | Out-File -FilePath "winget-manifests/$packageId.yaml" -Encoding UTF8
+        
+        # Default locale manifest
+        @"
+        PackageIdentifier: $packageId
+        PackageVersion: $version
+        PackageLocale: en-US
+        Publisher: Luna Team
+        PublisherUrl: https://github.com/$env:GITHUB_REPOSITORY
+        PublisherSupportUrl: https://github.com/$env:GITHUB_REPOSITORY/issues
+        PackageName: Luna Agent
+        PackageUrl: https://github.com/$env:GITHUB_REPOSITORY
+        License: MIT
+        LicenseUrl: https://github.com/$env:GITHUB_REPOSITORY/blob/main/LICENSE
+        ShortDescription: Visual AI assistant for autonomous computing
+        Description: Luna is an advanced AI agent that provides visual computer automation and autonomous task execution capabilities.
+        Moniker: luna
+        Tags:
+        - ai
+        - automation
+        - computer-vision
+        - assistant
+        - desktop
+        ManifestType: defaultLocale
+        ManifestVersion: 1.4.0
+        "@ | Out-File -FilePath "winget-manifests/$packageId.locale.en-US.yaml" -Encoding UTF8
+        
+        # Installer manifest
+        @"
+        PackageIdentifier: $packageId
+        PackageVersion: $version
+        Platform:
+        - Windows.Desktop
+        MinimumOSVersion: 10.0.0.0
+        InstallerType: exe
+        Scope: machine
+        InstallModes:
+        - interactive
+        - silent
+        - silentWithProgress
+        UpgradeBehavior: install
+        Installers:
+        - Architecture: x64
+          InstallerUrl: https://github.com/$env:GITHUB_REPOSITORY/releases/download/v$version/luna-agent-setup-$version.exe
+          InstallerSha256: # This would be populated from the build
+          InstallerSwitches:
+            Silent: /S
+            SilentWithProgress: /S
+        ManifestType: installer
+        ManifestVersion: 1.4.0
+        "@ | Out-File -FilePath "winget-manifests/$packageId.installer.yaml" -Encoding UTF8
+
+    - name: Upload WinGet manifests
+      uses: actions/upload-artifact@v4
+      with:
+        name: winget-manifests
+        path: winget-manifests/

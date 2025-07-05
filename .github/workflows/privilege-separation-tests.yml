@@ -1,0 +1,505 @@
+name: Privilege Separation Security Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'privilege-broker/**'
+      - 'autonomous-agent/src/services/PrivilegeBrokerClient.ts'
+      - '.github/workflows/privilege-separation-tests.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'privilege-broker/**'
+      - 'autonomous-agent/src/services/PrivilegeBrokerClient.ts'
+
+env:
+  DOTNET_VERSION: '8.0'
+  NODE_VERSION: '20'
+
+jobs:
+  security-validation-tests:
+    runs-on: windows-2022
+    name: Security Validation Tests
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Restore .NET dependencies
+      working-directory: privilege-broker
+      run: dotnet restore
+
+    - name: Build broker service
+      working-directory: privilege-broker/LunaBrokerService
+      run: dotnet build --configuration Release --no-restore
+
+    - name: Run security validation tests
+      working-directory: privilege-broker/tests
+      run: dotnet test --configuration Release --logger trx --results-directory TestResults
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: security-test-results
+        path: privilege-broker/tests/TestResults/**/*.trx
+
+  sandbox-integration-tests:
+    runs-on: windows-2022
+    name: Sandbox Integration Tests
+    needs: security-validation-tests
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+
+    - name: Setup Bun
+      uses: oven-sh/setup-bun@v1
+      with:
+        bun-version: latest
+
+    - name: Install Node.js dependencies
+      working-directory: autonomous-agent
+      run: bun install
+
+    - name: Build broker service
+      working-directory: privilege-broker/LunaBrokerService
+      run: dotnet build --configuration Release
+
+    - name: Create test certificates for signing
+      run: |
+        # Create a test certificate for the broker service
+        $cert = New-SelfSignedCertificate -Subject "CN=Luna Test Certificate" -CertStoreLocation "Cert:\CurrentUser\My" -KeyUsage DigitalSignature -Type CodeSigningCert
+        $certPath = "TestCert.pfx"
+        $certPassword = ConvertTo-SecureString -String "TestPassword123!" -Force -AsPlainText
+        Export-PfxCertificate -Cert $cert -FilePath $certPath -Password $certPassword
+        echo "TEST_CERT_PATH=$certPath" >> $env:GITHUB_ENV
+        echo "TEST_CERT_PASSWORD=TestPassword123!" >> $env:GITHUB_ENV
+
+    - name: Sign broker executable
+      run: |
+        # Sign the broker executable with test certificate
+        $certPath = $env:TEST_CERT_PATH
+        $certPassword = $env:TEST_CERT_PASSWORD
+        $exePath = "privilege-broker\LunaBrokerService\bin\Release\net8.0-windows\LunaBrokerService.exe"
+        
+        if (Test-Path $exePath) {
+          signtool sign /f $certPath /p $certPassword /t http://timestamp.digicert.com /fd sha256 $exePath
+          Write-Host "✅ Broker executable signed successfully"
+        } else {
+          Write-Error "❌ Broker executable not found at $exePath"
+          exit 1
+        }
+
+    - name: Create isolated test environment
+      run: |
+        # Create a separate user account for testing privilege separation
+        $testUser = "LunaTestUser"
+        $testPassword = "TestPassword123!"
+        
+        try {
+          # Create test user
+          net user $testUser $testPassword /add /passwordchg:no /expires:never
+          net localgroup "Users" $testUser /add
+          
+          # Grant specific permissions needed for testing
+          net localgroup "Log on as a service" $testUser /add
+          
+          Write-Host "✅ Test user created: $testUser"
+          echo "TEST_USER=$testUser" >> $env:GITHUB_ENV
+          echo "TEST_PASSWORD=$testPassword" >> $env:GITHUB_ENV
+        } catch {
+          Write-Error "❌ Failed to create test user: $_"
+          exit 1
+        }
+
+    - name: Install and start broker service
+      run: |
+        # Install the broker service for testing
+        $servicePath = "privilege-broker\LunaBrokerService\bin\Release\net8.0-windows\LunaBrokerService.exe"
+        $serviceName = "LunaBrokerServiceTest"
+        
+        if (Test-Path $servicePath) {
+          # Install service
+          sc.exe create $serviceName binPath= "$PWD\$servicePath" start= demand
+          
+          # Start service
+          sc.exe start $serviceName
+          
+          # Wait for service to start
+          Start-Sleep -Seconds 5
+          
+          # Verify service is running
+          $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+          if ($service -and $service.Status -eq "Running") {
+            Write-Host "✅ Broker service is running"
+          } else {
+            Write-Error "❌ Broker service failed to start"
+            sc.exe query $serviceName
+            exit 1
+          }
+        } else {
+          Write-Error "❌ Broker service executable not found"
+          exit 1
+        }
+
+    - name: Test unauthorized access rejection
+      timeout-minutes: 5
+      run: |
+        # Test that the broker service rejects unauthorized calls
+        $testScript = @"
+        const { PrivilegeBrokerClient } = require('./autonomous-agent/src/services/PrivilegeBrokerClient.ts');
+        
+        async function testUnauthorizedAccess() {
+          const client = new PrivilegeBrokerClient();
+          
+          try {
+            // Test 1: Try to access without proper authentication
+            console.log('🔍 Testing unauthorized registry access...');
+            await client.writeRegistry('HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run', 'Malware', 'C:\\malware.exe');
+            console.log('❌ ERROR: Unauthorized registry access was allowed!');
+            process.exit(1);
+          } catch (error) {
+            console.log('✅ PASS: Unauthorized registry access correctly blocked:', error.message);
+          }
+          
+          try {
+            // Test 2: Try to execute unauthorized executable
+            console.log('🔍 Testing unauthorized process execution...');
+            await client.startProcess('cmd.exe', '/c format c: /y');
+            console.log('❌ ERROR: Unauthorized process execution was allowed!');
+            process.exit(1);
+          } catch (error) {
+            console.log('✅ PASS: Unauthorized process execution correctly blocked:', error.message);
+          }
+          
+          try {
+            // Test 3: Try dangerous key sequence
+            console.log('🔍 Testing dangerous key sequence...');
+            await client.sendKeys('ctrl+alt+del');
+            console.log('❌ ERROR: Dangerous key sequence was allowed!');
+            process.exit(1);
+          } catch (error) {
+            console.log('✅ PASS: Dangerous key sequence correctly blocked:', error.message);
+          }
+          
+          try {
+            // Test 4: Try to access system files
+            console.log('🔍 Testing unauthorized file access...');
+            await client.writeFile('C:\\Windows\\System32\\drivers\\etc\\hosts', '127.0.0.1 malicious.com');
+            console.log('❌ ERROR: Unauthorized file access was allowed!');
+            process.exit(1);
+          } catch (error) {
+            console.log('✅ PASS: Unauthorized file access correctly blocked:', error.message);
+          }
+          
+          console.log('🎉 All unauthorized access tests passed!');
+        }
+        
+        testUnauthorizedAccess().catch(error => {
+          console.error('❌ Test failed:', error);
+          process.exit(1);
+        });
+        "@
+        
+        # Save test script
+        $testScript | Out-File -FilePath "test-unauthorized-access.js" -Encoding UTF8
+        
+        # Run test with Node.js
+        node test-unauthorized-access.js
+
+    - name: Test authorized access acceptance
+      timeout-minutes: 5
+      run: |
+        # Test that the broker service accepts properly authorized calls
+        $testScript = @"
+        const { PrivilegeBrokerClient } = require('./autonomous-agent/src/services/PrivilegeBrokerClient.ts');
+        
+        async function testAuthorizedAccess() {
+          const client = new PrivilegeBrokerClient();
+          
+          try {
+            // Test 1: Authorized registry access (Luna's own registry)
+            console.log('🔍 Testing authorized registry access...');
+            await client.writeRegistry('HKEY_CURRENT_USER\\Software\\Luna\\Test', 'TestValue', 'Success');
+            console.log('✅ PASS: Authorized registry access allowed');
+          } catch (error) {
+            console.log('❌ ERROR: Authorized registry access was blocked:', error.message);
+            process.exit(1);
+          }
+          
+          try {
+            // Test 2: Authorized executable
+            console.log('🔍 Testing authorized process execution...');
+            const result = await client.startProcess('notepad.exe');
+            console.log('✅ PASS: Authorized process execution allowed, PID:', result.processId);
+            
+            // Clean up - terminate the process
+            await client.terminateProcess(result.processId);
+          } catch (error) {
+            console.log('❌ ERROR: Authorized process execution was blocked:', error.message);
+            process.exit(1);
+          }
+          
+          try {
+            // Test 3: Safe key sequence
+            console.log('🔍 Testing safe key sequence...');
+            await client.sendKeys('Hello World');
+            console.log('✅ PASS: Safe key sequence allowed');
+          } catch (error) {
+            console.log('❌ ERROR: Safe key sequence was blocked:', error.message);
+            process.exit(1);
+          }
+          
+          try {
+            // Test 4: Authorized file access (Luna directory)
+            console.log('🔍 Testing authorized file access...');
+            await client.writeFile('C:\\ProgramData\\Luna\\test.txt', 'Test content');
+            console.log('✅ PASS: Authorized file access allowed');
+          } catch (error) {
+            console.log('❌ ERROR: Authorized file access was blocked:', error.message);
+            process.exit(1);
+          }
+          
+          try {
+            // Test 5: Screenshot (safe operation)
+            console.log('🔍 Testing screenshot functionality...');
+            const result = await client.takeScreenshot();
+            console.log('✅ PASS: Screenshot taken:', result.screenshotPath);
+          } catch (error) {
+            console.log('❌ ERROR: Screenshot was blocked:', error.message);
+            process.exit(1);
+          }
+          
+          console.log('🎉 All authorized access tests passed!');
+        }
+        
+        testAuthorizedAccess().catch(error => {
+          console.error('❌ Test failed:', error);
+          process.exit(1);
+        });
+        "@
+        
+        # Save test script
+        $testScript | Out-File -FilePath "test-authorized-access.js" -Encoding UTF8
+        
+        # Run test with Node.js
+        node test-authorized-access.js
+
+    - name: Test rate limiting
+      timeout-minutes: 3
+      run: |
+        # Test that rate limiting works correctly
+        $testScript = @"
+        const { PrivilegeBrokerClient } = require('./autonomous-agent/src/services/PrivilegeBrokerClient.ts');
+        
+        async function testRateLimiting() {
+          const client = new PrivilegeBrokerClient();
+          
+          console.log('🔍 Testing rate limiting...');
+          
+          let successCount = 0;
+          let rateLimitedCount = 0;
+          
+          // Try to make many requests quickly
+          for (let i = 0; i < 150; i++) {
+            try {
+              await client.getWindows();
+              successCount++;
+            } catch (error) {
+              if (error.message.includes('rate limit') || error.message.includes('Rate limit')) {
+                rateLimitedCount++;
+              } else {
+                console.log('Unexpected error:', error.message);
+              }
+            }
+          }
+          
+          console.log(\`Successful requests: \${successCount}\`);
+          console.log(\`Rate limited requests: \${rateLimitedCount}\`);
+          
+          if (rateLimitedCount > 0) {
+            console.log('✅ PASS: Rate limiting is working');
+          } else {
+            console.log('❌ ERROR: Rate limiting did not trigger');
+            process.exit(1);
+          }
+        }
+        
+        testRateLimiting().catch(error => {
+          console.error('❌ Test failed:', error);
+          process.exit(1);
+        });
+        "@
+        
+        # Save test script
+        $testScript | Out-File -FilePath "test-rate-limiting.js" -Encoding UTF8
+        
+        # Run test with Node.js
+        node test-rate-limiting.js
+
+    - name: Cleanup test environment
+      if: always()
+      run: |
+        # Stop and remove test service
+        $serviceName = "LunaBrokerServiceTest"
+        try {
+          sc.exe stop $serviceName
+          Start-Sleep -Seconds 3
+          sc.exe delete $serviceName
+          Write-Host "✅ Test service cleaned up"
+        } catch {
+          Write-Host "⚠️ Failed to cleanup test service: $_"
+        }
+        
+        # Remove test user
+        $testUser = "LunaTestUser"
+        try {
+          net user $testUser /delete
+          Write-Host "✅ Test user cleaned up"
+        } catch {
+          Write-Host "⚠️ Failed to cleanup test user: $_"
+        }
+        
+        # Clean up test files
+        Remove-Item -Path "test-*.js" -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path "TestCert.pfx" -Force -ErrorAction SilentlyContinue
+        Write-Host "✅ Test files cleaned up"
+
+    - name: Upload integration test logs
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: integration-test-logs
+        path: |
+          C:\ProgramData\Luna\Logs\*.log
+        retention-days: 7
+
+  performance-stress-test:
+    runs-on: windows-2022
+    name: Performance & Stress Tests
+    needs: [security-validation-tests, sandbox-integration-tests]
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+
+    - name: Build and start broker service
+      run: |
+        # Build broker service
+        dotnet build privilege-broker/LunaBrokerService --configuration Release
+        
+        # Install and start service
+        $servicePath = "privilege-broker\LunaBrokerService\bin\Release\net8.0-windows\LunaBrokerService.exe"
+        sc.exe create "LunaBrokerServicePerf" binPath= "$PWD\$servicePath" start= demand
+        sc.exe start "LunaBrokerServicePerf"
+        Start-Sleep -Seconds 5
+
+    - name: Run performance stress test
+      timeout-minutes: 10
+      run: |
+        # Performance test script
+        $testScript = @"
+        const { PrivilegeBrokerClient } = require('./autonomous-agent/src/services/PrivilegeBrokerClient.ts');
+        const { performance } = require('perf_hooks');
+        
+        async function stressTest() {
+          const client = new PrivilegeBrokerClient();
+          const testDurationMs = 60000; // 1 minute
+          const startTime = performance.now();
+          let requestCount = 0;
+          let errorCount = 0;
+          let totalResponseTime = 0;
+          
+          console.log('🔍 Starting 1-minute stress test...');
+          
+          while (performance.now() - startTime < testDurationMs) {
+            const requestStart = performance.now();
+            
+            try {
+              await client.getWindows();
+              const responseTime = performance.now() - requestStart;
+              totalResponseTime += responseTime;
+              requestCount++;
+              
+              if (requestCount % 100 === 0) {
+                const avgResponseTime = totalResponseTime / requestCount;
+                console.log(\`Requests: \${requestCount}, Avg Response Time: \${avgResponseTime.toFixed(2)}ms\`);
+              }
+            } catch (error) {
+              errorCount++;
+              if (errorCount > requestCount * 0.1) { // More than 10% error rate
+                console.log('❌ ERROR: High error rate detected');
+                process.exit(1);
+              }
+            }
+            
+            // Small delay to prevent overwhelming the system
+            await new Promise(resolve => setTimeout(resolve, 10));
+          }
+          
+          const avgResponseTime = totalResponseTime / requestCount;
+          const requestsPerSecond = requestCount / (testDurationMs / 1000);
+          
+          console.log(\`\\n📊 Stress Test Results:\`);
+          console.log(\`Total Requests: \${requestCount}\`);
+          console.log(\`Error Count: \${errorCount}\`);
+          console.log(\`Error Rate: \${(errorCount / requestCount * 100).toFixed(2)}%\`);
+          console.log(\`Average Response Time: \${avgResponseTime.toFixed(2)}ms\`);
+          console.log(\`Requests per Second: \${requestsPerSecond.toFixed(2)}\`);
+          
+          // Performance criteria
+          if (avgResponseTime > 1000) {
+            console.log('❌ ERROR: Average response time too high');
+            process.exit(1);
+          }
+          
+          if (errorCount / requestCount > 0.05) { // More than 5% error rate
+            console.log('❌ ERROR: Error rate too high');
+            process.exit(1);
+          }
+          
+          console.log('✅ PASS: Performance stress test completed successfully');
+        }
+        
+        stressTest().catch(error => {
+          console.error('❌ Stress test failed:', error);
+          process.exit(1);
+        });
+        "@
+        
+        $testScript | Out-File -FilePath "stress-test.js" -Encoding UTF8
+        node stress-test.js
+
+    - name: Cleanup performance test
+      if: always()
+      run: |
+        sc.exe stop "LunaBrokerServicePerf"
+        sc.exe delete "LunaBrokerServicePerf"
+        Remove-Item -Path "stress-test.js" -Force -ErrorAction SilentlyContinue
