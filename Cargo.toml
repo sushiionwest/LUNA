@@ -1,0 +1,175 @@
+[package]
+name = "luna-visual-ai"
+version = "1.0.0"
+edition = "2021"
+authors = ["Luna AI Team"]
+description = "Luna Visual AI - AI-Powered Computer Vision Assistant for Hobbyists"
+license = "MIT"
+repository = "https://github.com/sushiionwest/LUNA"
+readme = "README.md"
+keywords = ["ai", "computer-vision", "automation", "assistant", "rust"]
+categories = ["computer-vision", "gui", "multimedia"]
+
+[dependencies]
+# Core async runtime with full features
+tokio = { version = "1.35", features = ["full", "tracing"] }
+tokio-util = { version = "0.7", features = ["full"] }
+futures = "0.3"
+
+# AI and Machine Learning - Local inference only
+candle-core = { version = "0.6", features = ["cuda", "metal"] }
+candle-nn = "0.6"
+candle-transformers = "0.6"
+candle-onnx = "0.6"
+hf-hub = { version = "0.3", features = ["tokio"] }
+tokenizers = "0.15"
+
+# Computer Vision and Image Processing
+image = { version = "0.24", features = ["png", "jpeg", "bmp", "tiff"] }
+imageproc = "0.24"
+fast_image_resize = "3.0"
+
+# Windows System APIs
+windows = { version = "0.52", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Dwm", 
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_System_Threading",
+    "Win32_System_Memory",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_Security",
+    "Win32_UI_Accessibility",
+    "Win32_System_Com"
+] }
+
+# GUI Framework for Visual Overlay
+egui = { version = "0.24", features = ["bytemuck"] }
+eframe = { version = "0.24", features = ["wgpu"] }
+egui-wgpu = "0.24"
+wgpu = "0.18"
+
+# Audio Processing for Voice Commands
+cpal = { version = "0.15", features = ["asio"] }
+whisper-rs = { version = "0.1", features = ["gpu"] }
+rodio = "0.17"
+
+# Data Serialization and Configuration
+serde = { version = "1.0", features = ["derive", "rc"] }
+serde_json = "1.0"
+toml = "0.8"
+config = "0.14"
+
+# Error Handling and Logging
+anyhow = "1.0"
+thiserror = "1.0"
+tracing = { version = "0.1", features = ["max_level_trace", "release_max_level_info"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-appender = "0.2"
+
+# Command Line Interface
+clap = { version = "4.4", features = ["derive", "env"] }
+
+# Concurrency and Memory Management
+once_cell = "1.19"
+parking_lot = { version = "0.12", features = ["deadlock_detection"] }
+crossbeam = "0.8"
+rayon = "1.8"
+arc-swap = "1.6"
+
+# Utilities
+dirs = "5.0"
+uuid = { version = "1.6", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+regex = "1.10"
+lazy_static = "1.4"
+
+# Memory monitoring and profiling
+pprof = { version = "0.13", features = ["flamegraph"] }
+
+[dev-dependencies]
+# Testing frameworks
+tokio-test = "0.4"
+criterion = { version = "0.5", features = ["html_reports"] }
+proptest = "1.4"
+mockall = "0.12"
+tempfile = "3.8"
+
+# Memory testing
+valgrind_request = "1.1"
+
+[build-dependencies]
+cc = "1.0"
+embed-resource = "2.4"
+winres = "0.1"
+
+[[bin]]
+name = "luna"
+path = "src/main.rs"
+
+[[bin]]
+name = "luna-cli"
+path = "src/cli.rs"
+
+# Benchmarks
+[[bench]]
+name = "vision_pipeline"
+harness = false
+
+[[bench]]
+name = "screen_capture"
+harness = false
+
+# Examples
+[[example]]
+name = "basic_usage"
+path = "examples/basic_usage.rs"
+
+[[example]]
+name = "custom_commands"
+path = "examples/custom_commands.rs"
+
+[[example]]
+name = "plugin_development"
+path = "examples/plugin_development.rs"
+
+# Build profiles with memory optimization
+[profile.release]
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+opt-level = 3
+strip = "symbols"
+overflow-checks = false
+
+[profile.dev]
+opt-level = 1
+debug = true
+overflow-checks = true
+
+[profile.test]
+opt-level = 2
+debug = true
+
+# Feature flags for conditional compilation
+[features]
+default = ["cuda", "voice-commands", "visual-overlay"]
+cuda = ["candle-core/cuda"]
+metal = ["candle-core/metal"]  # For future macOS support
+voice-commands = ["whisper-rs", "cpal", "rodio"]
+visual-overlay = ["egui", "eframe"]
+debug-mode = ["tracing/max_level_trace"]
+memory-profiling = ["pprof"]
+plugin-system = []
+
+# Metadata for Windows installer
+[package.metadata.winget]
+package-identifier = "SushiionWest.LunaVisualAI"
+package-name = "Luna Visual AI"
+package-version = "1.0.0"
+package-locale = "en-US"
+publisher = "Sushiion West"
+license = "MIT"
+short-description = "AI-Powered Computer Vision Assistant"
+installer-type = "msi"
