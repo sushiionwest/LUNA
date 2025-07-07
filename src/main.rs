@@ -44,6 +44,16 @@ pub struct LunaApp {
     voice_enabled: bool,
     /// Current screenshot for preview
     current_screenshot: Option<egui::TextureHandle>,
+    /// Whether this is the first launch
+    first_launch: bool,
+    /// Whether to show the help panel
+    show_help: bool,
+    /// Auto-complete suggestions
+    suggestions: Vec<String>,
+    /// Whether Luna is in countdown mode
+    countdown: Option<u8>,
+    /// Current analysis results for preview
+    analysis_preview: Option<String>,
 }
 
 impl LunaApp {
@@ -53,6 +63,17 @@ impl LunaApp {
         
         let mut app = Self::default();
         app.status = "Luna Visual AI Ready! 🤖".to_string();
+        app.first_launch = true;
+        app.suggestions = vec![
+            "Close all browser tabs".to_string(),
+            "Click the Save button".to_string(),
+            "Open Control Panel".to_string(),
+            "Take a screenshot".to_string(),
+            "Type 'Hello World'".to_string(),
+            "Press Ctrl+C".to_string(),
+            "Scroll down".to_string(),
+            "Find and click Submit".to_string(),
+        ];
         
         // Initialize Luna core in background
         let core_clone = app.core.clone();
@@ -142,16 +163,50 @@ impl eframe::App for LunaApp {
         
         // Main panel
         egui::CentralPanel::default().show(ctx, |ui| {
+            // First launch tutorial
+            if self.first_launch {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(10.0);
+                    
+                    // Welcome message
+                    ui.group(|ui| {
+                        ui.set_min_width(ui.available_width());
+                        ui.vertical_centered(|ui| {
+                            ui.heading("🎉 Welcome to Luna Visual AI!");
+                            ui.label("Your AI assistant that sees and clicks for you");
+                            ui.add_space(10.0);
+                            
+                            ui.horizontal(|ui| {
+                                ui.label("🎯 Try saying:");
+                                if ui.small_button("'Close all browser tabs'").clicked() {
+                                    self.command_input = "Close all browser tabs".to_string();
+                                }
+                                if ui.small_button("'Click the Save button'").clicked() {
+                                    self.command_input = "Click the Save button".to_string();
+                                }
+                            });
+                            
+                            ui.add_space(5.0);
+                            if ui.button("🚀 Got it! Let's start").clicked() {
+                                self.first_launch = false;
+                            }
+                        });
+                    });
+                    
+                    ui.add_space(20.0);
+                });
+            }
+            
             // Header with Luna branding
             ui.vertical_centered(|ui| {
-                ui.add_space(20.0);
+                ui.add_space(if self.first_launch { 10.0 } else { 20.0 });
                 
                 // Luna logo and title
                 ui.heading("🌙 Luna Visual AI");
                 ui.label("Your One-Click Computer Assistant");
                 ui.add_space(10.0);
                 
-                // Status indicator
+                // Status indicator with enhanced visual feedback
                 let status_color = if self.is_processing {
                     egui::Color32::from_rgb(255, 165, 0) // Orange for processing
                 } else if self.status.contains("✅") {
@@ -162,7 +217,16 @@ impl eframe::App for LunaApp {
                     egui::Color32::from_rgb(100, 149, 237) // Blue for ready
                 };
                 
-                ui.colored_label(status_color, &self.status);
+                // Add processing indicator
+                if self.is_processing {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.colored_label(status_color, &self.status);
+                    });
+                } else {
+                    ui.colored_label(status_color, &self.status);
+                }
+                
                 ui.add_space(20.0);
             });
 
@@ -178,6 +242,26 @@ impl eframe::App for LunaApp {
                             .hint_text("e.g., 'Close all browser tabs' or 'Click the Save button'")
                             .font(egui::TextStyle::Body)
                     );
+                    
+                    // Auto-complete suggestions
+                    if !self.command_input.is_empty() {
+                        let matching_suggestions: Vec<_> = self.suggestions.iter()
+                            .filter(|s| s.to_lowercase().contains(&self.command_input.to_lowercase()))
+                            .take(3)
+                            .collect();
+                        
+                        if !matching_suggestions.is_empty() {
+                            ui.add_space(5.0);
+                            ui.horizontal(|ui| {
+                                ui.label("💡 Suggestions:");
+                                for suggestion in matching_suggestions {
+                                    if ui.small_button(suggestion).clicked() {
+                                        self.command_input = suggestion.clone();
+                                    }
+                                }
+                            });
+                        }
+                    }
                     
                     // Handle Enter key
                     if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
@@ -195,10 +279,10 @@ impl eframe::App for LunaApp {
                     }
                     
                     ui.horizontal(|ui| {
-                        // Execute button
+                        // Execute button - made more prominent
                         let execute_btn = ui.add_enabled(
                             !self.is_processing && !self.command_input.is_empty(),
-                            egui::Button::new("🚀 Execute")
+                            egui::Button::new("🚀 Execute").min_size(egui::vec2(80.0, 35.0))
                         );
                         
                         if execute_btn.clicked() {
@@ -213,15 +297,28 @@ impl eframe::App for LunaApp {
                             });
                         }
                         
-                        // Voice toggle
-                        if ui.add(egui::Button::new(if self.voice_enabled { "🔊 Voice On" } else { "🔇 Voice Off" })).clicked() {
+                        // Voice toggle with better visual feedback
+                        let voice_btn = ui.add(egui::Button::new(if self.voice_enabled { "🔊 Voice On" } else { "🔇 Voice Off" }));
+                        if voice_btn.clicked() {
                             self.voice_enabled = !self.voice_enabled;
+                            self.status = if self.voice_enabled { 
+                                "🎤 Voice input enabled - say your command!".to_string() 
+                            } else { 
+                                "🔇 Voice input disabled".to_string() 
+                            };
                         }
                         
-                        // Emergency stop
-                        if ui.add(egui::Button::new("🛑 Stop")).clicked() {
+                        // Emergency stop - always visible and prominent
+                        let stop_btn = ui.add(egui::Button::new("🛑 STOP").fill(egui::Color32::from_rgb(139, 0, 0)));
+                        if stop_btn.clicked() {
                             self.is_processing = false;
-                            self.status = "Stopped by user".to_string();
+                            self.countdown = None;
+                            self.status = "🛑 Stopped by user".to_string();
+                        }
+                        
+                        // Help button
+                        if ui.add(egui::Button::new("❓ Help")).clicked() {
+                            self.show_help = !self.show_help;
                         }
                     });
                 });
@@ -248,25 +345,86 @@ impl eframe::App for LunaApp {
             
             ui.add_space(10.0);
             
-            // Feature showcase
+            // Help panel
+            if self.show_help {
+                ui.group(|ui| {
+                    ui.set_min_width(ui.available_width());
+                    ui.vertical(|ui| {
+                        ui.heading("🎓 How to Use Luna");
+                        ui.separator();
+                        
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
+                                ui.label("📝 Text Commands:");
+                                ui.small("• Type what you want Luna to do");
+                                ui.small("• Use natural language");
+                                ui.small("• Press Enter or click Execute");
+                            });
+                            
+                            ui.separator();
+                            
+                            ui.vertical(|ui| {
+                                ui.label("🎤 Voice Commands:");
+                                ui.small("• Click 'Voice On' to enable");
+                                ui.small("• Speak your command clearly");
+                                ui.small("• Luna will confirm what it heard");
+                            });
+                        });
+                        
+                        ui.separator();
+                        
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
+                                ui.label("🛡️ Safety Features:");
+                                ui.small("• 3-second countdown before actions");
+                                ui.small("• Visual preview of what Luna will click");
+                                ui.small("• Press ESC or Stop to cancel");
+                            });
+                            
+                            ui.separator();
+                            
+                            ui.vertical(|ui| {
+                                ui.label("⌨️ Keyboard Shortcuts:");
+                                ui.small("• Enter: Execute command");
+                                ui.small("• Ctrl+L: Focus command input");
+                                ui.small("• Escape: Cancel current action");
+                            });
+                        });
+                        
+                        ui.separator();
+                        
+                        if ui.button("❌ Close Help").clicked() {
+                            self.show_help = false;
+                        }
+                    });
+                });
+                
+                ui.add_space(10.0);
+            }
+            
+            // Feature showcase with better organization
             ui.group(|ui| {
-                ui.label("🎯 What Luna Can Do:");
+                ui.label("🎯 What Luna Can Do - Click to Try:");
+                
                 ui.horizontal_wrapped(|ui| {
-                    let examples = [
-                        "Close all browser tabs",
-                        "Click the Save button",
-                        "Open Control Panel",
-                        "Find and click Submit",
-                        "Screenshot this window",
-                        "Type 'Hello World'",
-                        "Press Ctrl+C",
-                        "Scroll down",
+                    let categories = [
+                        ("🌐 Browser", vec!["Close all browser tabs", "Refresh page", "Open new tab"]),
+                        ("💾 Files", vec!["Click the Save button", "Open Control Panel", "Screenshot this window"]),
+                        ("⌨️ Input", vec!["Type 'Hello World'", "Press Ctrl+C", "Scroll down"]),
+                        ("🔍 Actions", vec!["Find and click Submit", "Click OK button", "Select all text"]),
                     ];
                     
-                    for example in &examples {
-                        if ui.small_button(format!("💡 {}", example)).clicked() {
-                            self.command_input = example.to_string();
-                        }
+                    for (category, examples) in &categories {
+                        ui.group(|ui| {
+                            ui.vertical(|ui| {
+                                ui.small(*category);
+                                for example in examples {
+                                    if ui.small_button(format!("💡 {}", example)).clicked() {
+                                        self.command_input = example.to_string();
+                                    }
+                                }
+                            });
+                        });
                     }
                 });
             });
@@ -315,6 +473,11 @@ impl Clone for LunaApp {
             command_history: self.command_history.clone(),
             voice_enabled: self.voice_enabled,
             current_screenshot: None, // Can't clone TextureHandle
+            first_launch: false,
+            show_help: false,
+            suggestions: self.suggestions.clone(),
+            countdown: self.countdown,
+            analysis_preview: self.analysis_preview.clone(),
         }
     }
 }
