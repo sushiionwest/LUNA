@@ -1,1 +1,362 @@
-//! # Luna Visual AI - Main Application\n//! \n//! Luna is a visual AI assistant that sees your screen and performs actions based on natural\n//! language commands. It uses state-of-the-art AI models for computer vision and understanding.\n//!\n//! ## The 6-Step Luna Flow\n//! 1. **YOU SPEAK OR TYPE**: Natural language command input\n//! 2. **LUNA TAKES A PICTURE**: High-speed screen capture\n//! 3. **AI ANALYZES THE PICTURE**: 4 AI specialists work together\n//!    - Florence-2: Object detection and UI element identification\n//!    - CLIP: Text-visual matching for semantic understanding\n//!    - TrOCR: Text recognition from screen elements\n//!    - SAM: Precise click target segmentation\n//! 4. **LUNA DECIDES WHAT TO CLICK**: AI pipeline coordination\n//! 5. **THE COUNTDOWN**: 3-second safety preview with visual overlay\n//! 6. **LUNA CLICKS**: Precise mouse/keyboard automation\n//!\n//! ## Safety Features\n//! - Visual feedback showing what Luna sees and plans to do\n//! - 3-second countdown with cancellation option (ESC key)\n//! - Confidence thresholds and dangerous action detection\n//! - Local-only processing (no cloud dependencies)\n//!\n//! ## Performance\n//! - Sub-2 second end-to-end processing\n//! - Real-time visual feedback\n//! - Memory-efficient AI model management\n//! - GPU acceleration with CPU fallback\n\nuse luna_visual_ai::{\n    core::{LunaError, LunaResult, MemoryManager},\n    ai::{AiPipeline, AiAnalysisResult, PipelineConfig},\n    vision::{ScreenCapture, Screenshot, CaptureConfig},\n    overlay::{VisualFeedback, FeedbackConfig},\n    utils::{MetricsCollector, logging},\n};\nuse clap::{Arg, Command};\nuse std::io::{self, Write};\nuse std::sync::Arc;\nuse std::time::Instant;\nuse tokio::signal;\nuse tracing::{info, warn, error};\n\n/// Main Luna application state\nstruct LunaApp {\n    /// AI processing pipeline\n    ai_pipeline: Arc<AiPipeline>,\n    /// Screen capture system\n    screen_capture: Arc<ScreenCapture>,\n    /// Visual feedback overlay\n    visual_feedback: Arc<VisualFeedback>,\n    /// Performance metrics collector\n    metrics: Arc<MetricsCollector>,\n    /// Memory manager\n    memory_manager: Arc<MemoryManager>,\n    /// Application configuration\n    config: LunaConfig,\n}\n\n/// Luna application configuration\n#[derive(Debug, Clone)]\nstruct LunaConfig {\n    /// Enable voice commands\n    pub enable_voice: bool,\n    /// Enable visual overlay\n    pub enable_overlay: bool,\n    /// Safety countdown duration in seconds\n    pub countdown_seconds: u32,\n    /// Enable debug mode\n    pub debug_mode: bool,\n    /// Log level\n    pub log_level: String,\n    /// Enable performance monitoring\n    pub enable_metrics: bool,\n}\n\nimpl Default for LunaConfig {\n    fn default() -> Self {\n        Self {\n            enable_voice: false, // Disabled by default for this implementation\n            enable_overlay: true,\n            countdown_seconds: 3,\n            debug_mode: false,\n            log_level: \"info\".to_string(),\n            enable_metrics: true,\n        }\n    }\n}\n\n#[tokio::main]\nasync fn main() -> LunaResult<()> {\n    // Parse command line arguments\n    let matches = Command::new(\"Luna Visual AI\")\n        .version(\"1.0.0\")\n        .author(\"Luna Development Team\")\n        .about(\"AI-powered visual automation assistant that sees and interacts with your screen\")\n        .arg(\n            Arg::new(\"command\")\n                .short('c')\n                .long(\"command\")\n                .value_name(\"COMMAND\")\n                .help(\"Execute a single command and exit\")\n        )\n        .arg(\n            Arg::new(\"no-voice\")\n                .long(\"no-voice\")\n                .help(\"Disable voice command input\")\n                .action(clap::ArgAction::SetTrue)\n        )\n        .arg(\n            Arg::new(\"no-overlay\")\n                .long(\"no-overlay\")\n                .help(\"Disable visual feedback overlay\")\n                .action(clap::ArgAction::SetTrue)\n        )\n        .arg(\n            Arg::new(\"countdown\")\n                .long(\"countdown\")\n                .value_name(\"SECONDS\")\n                .help(\"Safety countdown duration (1-10 seconds)\")\n                .default_value(\"3\")\n        )\n        .arg(\n            Arg::new(\"debug\")\n                .short('d')\n                .long(\"debug\")\n                .help(\"Enable debug mode with verbose logging\")\n                .action(clap::ArgAction::SetTrue)\n        )\n        .arg(\n            Arg::new(\"log-level\")\n                .long(\"log-level\")\n                .value_name(\"LEVEL\")\n                .help(\"Set log level (error, warn, info, debug, trace)\")\n                .default_value(\"info\")\n        )\n        .get_matches();\n\n    // Create configuration from command line arguments\n    let mut config = LunaConfig::default();\n    \n    if matches.get_flag(\"no-voice\") {\n        config.enable_voice = false;\n    }\n    \n    if matches.get_flag(\"no-overlay\") {\n        config.enable_overlay = false;\n    }\n    \n    if let Some(countdown) = matches.get_one::<String>(\"countdown\") {\n        match countdown.parse::<u32>() {\n            Ok(seconds) if seconds >= 1 && seconds <= 10 => {\n                config.countdown_seconds = seconds;\n            }\n            _ => {\n                eprintln!(\"Error: Countdown must be between 1 and 10 seconds\");\n                std::process::exit(1);\n            }\n        }\n    }\n    \n    if matches.get_flag(\"debug\") {\n        config.debug_mode = true;\n        config.log_level = \"debug\".to_string();\n    }\n    \n    if let Some(log_level) = matches.get_one::<String>(\"log-level\") {\n        config.log_level = log_level.clone();\n    }\n\n    // Initialize logging\n    logging::init(&config.log_level, config.debug_mode)?;\n    \n    info!(\"\ud83c\udf19 Starting Luna Visual AI v1.0.0\");\n    info!(\"Configuration: voice={}, overlay={}, countdown={}s, debug={}\",\n        config.enable_voice, config.enable_overlay, config.countdown_seconds, config.debug_mode\n    );\n\n    // Check for single command execution\n    if let Some(command) = matches.get_one::<String>(\"command\") {\n        return execute_single_command(command, &config).await;\n    }\n\n    // Initialize and run the main application\n    let mut app = LunaApp::new(config).await?;\n    app.initialize().await?;\n    \n    // Run the main application loop\n    match app.run().await {\n        Ok(()) => {\n            info!(\"Luna shut down successfully\");\n            Ok(())\n        }\n        Err(e) => {\n            error!(\"Luna encountered an error: {}\", e);\n            Err(e)\n        }\n    }\n}\n\nimpl LunaApp {\n    /// Create a new Luna application instance\n    async fn new(config: LunaConfig) -> LunaResult<Self> {\n        info!(\"Creating Luna application instance\");\n        \n        // Initialize memory manager\n        let memory_manager = Arc::new(MemoryManager::new()?);\n        \n        // Initialize metrics collector\n        let metrics = Arc::new(MetricsCollector::new());\n        \n        // Initialize AI pipeline\n        let ai_config = PipelineConfig::default();\n        let ai_pipeline = Arc::new(AiPipeline::new(ai_config, memory_manager.clone(), metrics.clone()).await?);\n        \n        // Initialize screen capture\n        let capture_config = CaptureConfig::default();\n        let mut screen_capture = ScreenCapture::new(capture_config, memory_manager.clone(), metrics.clone())?;\n        let screen_capture = Arc::new(screen_capture);\n        \n        // Initialize visual feedback\n        let feedback_config = FeedbackConfig::default();\n        let visual_feedback = Arc::new(VisualFeedback::new(feedback_config));\n        \n        Ok(Self {\n            ai_pipeline,\n            screen_capture,\n            visual_feedback,\n            metrics,\n            memory_manager,\n            config,\n        })\n    }\n    \n    /// Initialize all Luna subsystems\n    async fn initialize(&mut self) -> LunaResult<()> {\n        info!(\"\ud83d\ude80 Initializing Luna subsystems...\");\n        let start_time = Instant::now();\n        \n        // Initialize core subsystems in parallel\n        let ai_init = self.ai_pipeline.initialize();\n        let capture_init = {\n            // Need to get mutable reference to screen_capture\n            // For this demo, we'll just log the initialization\n            async {\n                info!(\"Screen capture system initialized\");\n                Ok(())\n            }\n        };\n        let feedback_init = if self.config.enable_overlay {\n            Some(async {\n                info!(\"Visual feedback system initialized\");\n                Ok(())\n            })\n        } else {\n            None\n        };\n        \n        // Wait for all initializations\n        ai_init.await?;\n        capture_init.await?;\n        \n        if let Some(feedback_init) = feedback_init {\n            feedback_init.await?;\n        }\n        \n        // Validate all connections\n        self.validate_all_systems().await?;\n        \n        let init_time = start_time.elapsed();\n        info!(\"\u2705 Luna initialized successfully in {:?}\", init_time);\n        \n        // Record initialization metrics\n        self.metrics.record_system_event(\n            \"luna_app\".to_string(),\n            \"initialized\".to_string(),\n            init_time,\n            true,\n        ).await;\n        \n        Ok(())\n    }\n    \n    /// Main application loop\n    async fn run(&mut self) -> LunaResult<()> {\n        info!(\"\ud83c\udf19 Luna is ready! Listening for commands...\");\n        \n        // Print usage information\n        self.print_usage_info().await;\n        \n        // Set up graceful shutdown\n        let mut shutdown_signal = Box::pin(signal::ctrl_c());\n        \n        // Main event loop\n        loop {\n            tokio::select! {\n                // Handle shutdown signal\n                _ = &mut shutdown_signal => {\n                    info!(\"Received shutdown signal\");\n                    break;\n                }\n                \n                // Handle text commands from stdin\n                text_result = self.read_text_command() => {\n                    match text_result {\n                        Ok(Some(command)) => {\n                            info!(\"\ud83d\udcac Text command received: {}\", command);\n                            if let Err(e) = self.process_command(&command).await {\n                                error!(\"Failed to process text command: {}\", e);\n                            }\n                        }\n                        Ok(None) => {\n                            // No command, continue\n                        }\n                        Err(e) => {\n                            error!(\"Error reading text command: {}\", e);\n                        }\n                    }\n                }\n                \n                // Periodic maintenance tasks\n                _ = tokio::time::sleep(std::time::Duration::from_secs(60)) => {\n                    self.perform_maintenance().await;\n                }\n            }\n        }\n        \n        // Cleanup before shutdown\n        self.cleanup().await?;\n        \n        Ok(())\n    }\n    \n    /// Process a command through the complete 6-step Luna flow\n    async fn process_command(&self, command: &str) -> LunaResult<()> {\n        let start_time = Instant::now();\n        info!(\"\ud83d\udd04 Processing command: '{}'\", command);\n        \n        // STEP 1: Command is already received (voice or text)\n        \n        // STEP 2: LUNA TAKES A PICTURE\n        info!(\"\ud83d\udcf7 Step 2: Taking screenshot...\");\n        let screenshot = self.screen_capture.capture_screen().await\n            .map_err(|e| {\n                error!(\"Failed to capture screen: {}\", e);\n                e\n            })?;\n        \n        info!(\"Screenshot captured: {}x{} ({} bytes)\", \n            screenshot.dimensions.0, screenshot.dimensions.1, screenshot.data.len());\n        \n        // STEP 3: AI ANALYZES THE PICTURE\n        info!(\"\ud83e\udde0 Step 3: AI analyzing screenshot...\");\n        let analysis_result = self.ai_pipeline.process_command(\n            command.to_string(),\n            screenshot.data.clone(),\n            screenshot.dimensions,\n        ).await.map_err(|e| {\n            error!(\"AI analysis failed: {}\", e);\n            e\n        })?;\n        \n        info!(\"AI analysis complete: {} objects, {} text regions, {} click targets (confidence: {:.1}%)\",\n            analysis_result.detected_objects.len(),\n            analysis_result.extracted_text.len(),\n            analysis_result.click_targets.len(),\n            analysis_result.confidence * 100.0\n        );\n        \n        // STEP 4: LUNA DECIDES WHAT TO CLICK (already done in AI pipeline)\n        info!(\"\ud83c\udfaf Step 4: Click targets identified\");\n        \n        if analysis_result.click_targets.is_empty() {\n            warn!(\"No click targets found for command: {}\", command);\n            return Err(LunaError::AiModel {\n                model: \"Pipeline\".to_string(),\n                error: \"No suitable click targets found\".to_string(),\n                suggestion: \"Try rephrasing the command or ensure the target is visible on screen\".to_string(),\n            });\n        }\n        \n        let primary_target = &analysis_result.click_targets[0];\n        info!(\"Primary target: {} at ({}, {}) with {:.1}% confidence\",\n            primary_target.element_type,\n            primary_target.coordinates.0,\n            primary_target.coordinates.1,\n            primary_target.confidence * 100.0\n        );\n        \n        // STEP 5: THE COUNTDOWN (Safety Feature)\n        if self.config.enable_overlay {\n            info!(\"\u23f0 Step 5: Showing visual feedback and countdown...\");\n            \n            // Show visual feedback overlay\n            let overlay_id = self.visual_feedback.show_analysis_results(\n                &analysis_result.detected_objects,\n                &analysis_result.extracted_text,\n                &analysis_result.click_targets,\n                egui::Rect::from_min_size(\n                    egui::Pos2::new(0.0, 0.0),\n                    egui::Vec2::new(screenshot.dimensions.0 as f32, screenshot.dimensions.1 as f32),\n                ),\n            ).await?;\n            \n            // Countdown with cancellation option\n            let cancelled = self.countdown_with_cancellation().await?;\n            \n            // Remove overlay\n            self.visual_feedback.remove_overlay(&overlay_id).await?;\n            \n            if cancelled {\n                info!(\"\u274c Command cancelled by user\");\n                return Ok(());\n            }\n        } else {\n            info!(\"\u23f0 Step 5: {}s safety delay...\", self.config.countdown_seconds);\n            tokio::time::sleep(std::time::Duration::from_secs(self.config.countdown_seconds as u64)).await;\n        }\n        \n        // STEP 6: LUNA CLICKS (Mock implementation)\n        info!(\"\ud83d\uddb1\ufe0f Step 6: Executing click at ({}, {})...\", \n            primary_target.coordinates.0, primary_target.coordinates.1);\n        \n        // Mock click execution\n        self.simulate_click(\n            primary_target.coordinates.0,\n            primary_target.coordinates.1,\n        ).await?;\n        \n        let total_time = start_time.elapsed();\n        info!(\"\u2705 Command completed successfully in {:?}\", total_time);\n        \n        // Record metrics\n        self.metrics.record_custom_metric(\n            \"command_processing_time_ms\".to_string(),\n            total_time.as_millis() as f64,\n        ).await;\n        \n        self.metrics.record_custom_metric(\n            \"command_success\".to_string(),\n            1.0,\n        ).await;\n        \n        Ok(())\n    }\n    \n    /// Simulate click execution (mock implementation)\n    async fn simulate_click(&self, x: u32, y: u32) -> LunaResult<()> {\n        // In a real implementation, this would use Windows API to perform actual clicks\n        info!(\"[MOCK] Clicking at coordinates ({}, {})\", x, y);\n        \n        // Simulate click delay\n        tokio::time::sleep(std::time::Duration::from_millis(100)).await;\n        \n        info!(\"[MOCK] Click executed successfully\");\n        Ok(())\n    }\n    \n    /// Countdown with cancellation option\n    async fn countdown_with_cancellation(&self) -> LunaResult<bool> {\n        for i in (1..=self.config.countdown_seconds).rev() {\n            info!(\"Executing in {}... (Press Ctrl+C to cancel)\", i);\n            \n            // Check for cancellation (ESC key would be checked in a real implementation)\n            let cancelled = self.check_for_cancellation().await;\n            if cancelled {\n                return Ok(true);\n            }\n            \n            tokio::time::sleep(std::time::Duration::from_secs(1)).await;\n        }\n        \n        Ok(false)\n    }\n    \n    /// Check if user wants to cancel the action\n    async fn check_for_cancellation(&self) -> bool {\n        // Mock implementation - in real version would check for ESC key\n        false\n    }\n    \n    /// Read text command from stdin\n    async fn read_text_command(&self) -> LunaResult<Option<String>> {\n        // Use blocking I/O in a separate task to avoid blocking the async runtime\n        let command = tokio::task::spawn_blocking(|| {\n            print!(\"Luna> \");\n            io::stdout().flush().ok();\n            \n            let mut input = String::new();\n            match io::stdin().read_line(&mut input) {\n                Ok(_) => {\n                    let command = input.trim().to_string();\n                    if command.is_empty() || command == \"quit\" || command == \"exit\" {\n                        None\n                    } else {\n                        Some(command)\n                    }\n                }\n                Err(_) => None,\n            }\n        }).await.map_err(|e| LunaError::Input {\n            operation: \"read text command\".to_string(),\n            error: e.to_string(),\n            suggestion: \"Check console input\".to_string(),\n        })?;\n        \n        Ok(command)\n    }\n    \n    /// Validate all subsystems\n    async fn validate_all_systems(&self) -> LunaResult<()> {\n        info!(\"\ud83d\udd0d Validating all systems...\");\n        \n        // Validate AI pipeline\n        self.ai_pipeline.validate_all_connections().await?;\n        \n        // Validate screen capture\n        self.screen_capture.validate().await?;\n        \n        // Validate visual feedback (if enabled)\n        if self.config.enable_overlay {\n            self.visual_feedback.validate().await?;\n        }\n        \n        info!(\"\u2705 All systems validated successfully\");\n        Ok(())\n    }\n    \n    /// Print usage information\n    async fn print_usage_info(&self) {\n        println!();\n        println!(\"\ud83c\udf19 Luna Visual AI is ready!\");\n        println!();\n        println!(\"How to use Luna:\");\n        println!(\"  \ud83d\udcac Text: Type your command and press Enter\");\n        println!(\"  \ud83d\uded1 Cancel: Press Ctrl+C to quit Luna\");\n        println!();\n        println!(\"Example commands:\");\n        println!(\"  \u2022 'Click the save button'\");\n        println!(\"  \u2022 'Close this window'\");\n        println!(\"  \u2022 'Open the file menu'\");\n        println!(\"  \u2022 'Click on settings'\");\n        println!();\n        \n        if self.config.enable_overlay {\n            println!(\"\ud83c\udfa8 Visual overlay is enabled - you'll see what Luna detects before it acts\");\n        }\n        \n        println!(\"\u23f0 Safety countdown: {} seconds\", self.config.countdown_seconds);\n        println!();\n        println!(\"Type 'quit' or 'exit' to stop, or press Ctrl+C\");\n        println!();\n    }\n    \n    /// Perform periodic maintenance tasks\n    async fn perform_maintenance(&self) {\n        debug!(\"Performing maintenance tasks...\");\n        \n        // Cleanup visual overlays\n        self.visual_feedback.clear_all_overlays().await;\n        \n        // Log performance metrics\n        if self.config.enable_metrics {\n            self.log_performance_metrics().await;\n        }\n    }\n    \n    /// Log current performance metrics\n    async fn log_performance_metrics(&self) {\n        let ai_status = self.ai_pipeline.get_status().await;\n        let capture_status = self.screen_capture.get_status().await;\n        let feedback_status = self.visual_feedback.get_status().await;\n        \n        debug!(\"Performance metrics:\");\n        debug!(\"  AI Pipeline: {:?}\", ai_status.get(\"pipeline\"));\n        debug!(\"  Screen Capture: {} captures, {} success rate\", \n            capture_status.get(\"total_captures\").unwrap_or(&\"0\".to_string()),\n            capture_status.get(\"success_rate\").unwrap_or(&\"N/A\".to_string())\n        );\n        debug!(\"  Visual Feedback: {} active overlays\", \n            feedback_status.get(\"active_overlays\").unwrap_or(&\"0\".to_string())\n        );\n    }\n    \n    /// Cleanup all resources\n    async fn cleanup(&mut self) -> LunaResult<()> {\n        info!(\"\ud83e\uddf9 Cleaning up Luna resources...\");\n        \n        // Cleanup all subsystems\n        self.ai_pipeline.cleanup().await?;\n        self.visual_feedback.cleanup().await?;\n        \n        info!(\"\u2705 Cleanup completed\");\n        Ok(())\n    }\n}\n\n/// Execute a single command and exit\nasync fn execute_single_command(command: &str, config: &LunaConfig) -> LunaResult<()> {\n    info!(\"Executing single command: {}\", command);\n    \n    let mut app = LunaApp::new(config.clone()).await?;\n    app.initialize().await?;\n    \n    app.process_command(command).await?;\n    \n    info!(\"Single command execution completed\");\n    Ok(())\n}\n\n/// Add use statement for debug macro\nuse tracing::debug;
+/*!
+ * Luna Visual AI - One-Click Computer Assistant
+ * 
+ * Just double-click luna.exe and start giving voice or text commands!
+ * Luna sees your screen and clicks where you want it to click.
+ */
+
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // Hide console in release
+
+use anyhow::Result;
+use eframe::egui;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use tracing::{info, error};
+
+mod ai;
+mod core;
+mod input;
+mod overlay;
+mod utils;
+mod vision;
+
+use ai::AIVisionPipeline;
+use core::{LunaCore, LunaEvent};
+use overlay::VisualOverlay;
+use vision::ScreenCapture;
+
+/// Main Luna Visual AI Application
+#[derive(Default)]
+pub struct LunaApp {
+    /// Core AI processing engine
+    core: Arc<Mutex<Option<LunaCore>>>,
+    /// Current user command input
+    command_input: String,
+    /// Current status message
+    status: String,
+    /// Whether Luna is actively processing
+    is_processing: bool,
+    /// Whether to show debug info
+    show_debug: bool,
+    /// Recent command history
+    command_history: Vec<String>,
+    /// Whether voice input is enabled
+    voice_enabled: bool,
+    /// Current screenshot for preview
+    current_screenshot: Option<egui::TextureHandle>,
+}
+
+impl LunaApp {
+    fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        // Setup custom fonts and styling
+        Self::setup_custom_style(&cc.egui_ctx);
+        
+        let mut app = Self::default();
+        app.status = "Luna Visual AI Ready! 🤖".to_string();
+        
+        // Initialize Luna core in background
+        let core_clone = app.core.clone();
+        tokio::spawn(async move {
+            match LunaCore::new().await {
+                Ok(core) => {
+                    *core_clone.lock().await = Some(core);
+                    info!("Luna core initialized successfully");
+                }
+                Err(e) => {
+                    error!("Failed to initialize Luna core: {}", e);
+                }
+            }
+        });
+        
+        app
+    }
+
+    fn setup_custom_style(ctx: &egui::Context) {
+        let mut style = (*ctx.style()).clone();
+        
+        // Modern dark theme with Luna branding
+        style.visuals.dark_mode = true;
+        style.visuals.override_text_color = Some(egui::Color32::from_rgb(220, 220, 220));
+        style.visuals.window_fill = egui::Color32::from_rgb(25, 25, 35);
+        style.visuals.panel_fill = egui::Color32::from_rgb(30, 30, 40);
+        style.visuals.faint_bg_color = egui::Color32::from_rgb(40, 40, 50);
+        
+        // Luna brand colors
+        style.visuals.selection.bg_fill = egui::Color32::from_rgb(100, 149, 237); // Cornflower blue
+        style.visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(50, 50, 60);
+        style.visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(70, 70, 80);
+        style.visuals.widgets.active.bg_fill = egui::Color32::from_rgb(100, 149, 237);
+        
+        // Rounded corners for modern look
+        style.visuals.widgets.noninteractive.rounding = egui::Rounding::same(8.0);
+        style.visuals.widgets.inactive.rounding = egui::Rounding::same(8.0);
+        style.visuals.widgets.hovered.rounding = egui::Rounding::same(8.0);
+        style.visuals.widgets.active.rounding = egui::Rounding::same(8.0);
+        
+        ctx.set_style(style);
+    }
+
+    async fn execute_command(&mut self, command: &str) -> Result<()> {
+        self.is_processing = true;
+        self.status = format!("Processing: {}", command);
+        
+        // Add to history
+        if !command.is_empty() && !self.command_history.contains(&command.to_string()) {
+            self.command_history.push(command.to_string());
+            if self.command_history.len() > 10 {
+                self.command_history.remove(0);
+            }
+        }
+
+        // Get core reference
+        let core_guard = self.core.lock().await;
+        let core = match core_guard.as_ref() {
+            Some(core) => core,
+            None => {
+                self.status = "Luna core not ready yet...".to_string();
+                self.is_processing = false;
+                return Ok(());
+            }
+        };
+
+        // Execute the command
+        match core.execute_command(command).await {
+            Ok(_) => {
+                self.status = "✅ Command completed successfully!".to_string();
+            }
+            Err(e) => {
+                self.status = format!("❌ Error: {}", e);
+                error!("Command execution failed: {}", e);
+            }
+        }
+        
+        self.is_processing = false;
+        Ok(())
+    }
+}
+
+impl eframe::App for LunaApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Set window title
+        ctx.send_viewport_cmd(egui::ViewportCommand::Title("Luna Visual AI".to_string()));
+        
+        // Main panel
+        egui::CentralPanel::default().show(ctx, |ui| {
+            // Header with Luna branding
+            ui.vertical_centered(|ui| {
+                ui.add_space(20.0);
+                
+                // Luna logo and title
+                ui.heading("🌙 Luna Visual AI");
+                ui.label("Your One-Click Computer Assistant");
+                ui.add_space(10.0);
+                
+                // Status indicator
+                let status_color = if self.is_processing {
+                    egui::Color32::from_rgb(255, 165, 0) // Orange for processing
+                } else if self.status.contains("✅") {
+                    egui::Color32::from_rgb(50, 205, 50) // Green for success
+                } else if self.status.contains("❌") {
+                    egui::Color32::from_rgb(255, 69, 0) // Red for error
+                } else {
+                    egui::Color32::from_rgb(100, 149, 237) // Blue for ready
+                };
+                
+                ui.colored_label(status_color, &self.status);
+                ui.add_space(20.0);
+            });
+
+            // Command input section
+            ui.group(|ui| {
+                ui.set_min_height(80.0);
+                ui.vertical(|ui| {
+                    ui.label("💬 Tell Luna what to do:");
+                    
+                    let response = ui.add_sized(
+                        [ui.available_width(), 40.0],
+                        egui::TextEdit::singleline(&mut self.command_input)
+                            .hint_text("e.g., 'Close all browser tabs' or 'Click the Save button'")
+                            .font(egui::TextStyle::Body)
+                    );
+                    
+                    // Handle Enter key
+                    if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        let command = self.command_input.clone();
+                        if !command.is_empty() {
+                            self.command_input.clear();
+                            
+                            // Execute command asynchronously
+                            let rt = tokio::runtime::Handle::current();
+                            let mut app_clone = self.clone(); // We'll need to implement Clone for this
+                            rt.spawn(async move {
+                                let _ = app_clone.execute_command(&command).await;
+                            });
+                        }
+                    }
+                    
+                    ui.horizontal(|ui| {
+                        // Execute button
+                        let execute_btn = ui.add_enabled(
+                            !self.is_processing && !self.command_input.is_empty(),
+                            egui::Button::new("🚀 Execute")
+                        );
+                        
+                        if execute_btn.clicked() {
+                            let command = self.command_input.clone();
+                            self.command_input.clear();
+                            
+                            // Execute command asynchronously
+                            let rt = tokio::runtime::Handle::current();
+                            let mut app_clone = self.clone(); // We'll implement Clone
+                            rt.spawn(async move {
+                                let _ = app_clone.execute_command(&command).await;
+                            });
+                        }
+                        
+                        // Voice toggle
+                        if ui.add(egui::Button::new(if self.voice_enabled { "🔊 Voice On" } else { "🔇 Voice Off" })).clicked() {
+                            self.voice_enabled = !self.voice_enabled;
+                        }
+                        
+                        // Emergency stop
+                        if ui.add(egui::Button::new("🛑 Stop")).clicked() {
+                            self.is_processing = false;
+                            self.status = "Stopped by user".to_string();
+                        }
+                    });
+                });
+            });
+            
+            ui.add_space(10.0);
+            
+            // Command history
+            if !self.command_history.is_empty() {
+                ui.group(|ui| {
+                    ui.label("📜 Recent Commands:");
+                    egui::ScrollArea::vertical()
+                        .max_height(100.0)
+                        .show(ui, |ui| {
+                            for (i, cmd) in self.command_history.iter().rev().enumerate() {
+                                let response = ui.selectable_label(false, cmd);
+                                if response.clicked() {
+                                    self.command_input = cmd.clone();
+                                }
+                            }
+                        });
+                });
+            }
+            
+            ui.add_space(10.0);
+            
+            // Feature showcase
+            ui.group(|ui| {
+                ui.label("🎯 What Luna Can Do:");
+                ui.horizontal_wrapped(|ui| {
+                    let examples = [
+                        "Close all browser tabs",
+                        "Click the Save button",
+                        "Open Control Panel",
+                        "Find and click Submit",
+                        "Screenshot this window",
+                        "Type 'Hello World'",
+                        "Press Ctrl+C",
+                        "Scroll down",
+                    ];
+                    
+                    for example in &examples {
+                        if ui.small_button(format!("💡 {}", example)).clicked() {
+                            self.command_input = example.to_string();
+                        }
+                    }
+                });
+            });
+            
+            // Debug info toggle
+            ui.add_space(20.0);
+            ui.horizontal(|ui| {
+                if ui.small_button("🔧 Debug Info").clicked() {
+                    self.show_debug = !self.show_debug;
+                }
+                
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.hyperlink_to("📚 Documentation", "https://github.com/sushiionwest/LUNA");
+                    ui.label("•");
+                    ui.small("v1.0.0");
+                });
+            });
+            
+            if self.show_debug {
+                ui.separator();
+                ui.group(|ui| {
+                    ui.label("🔍 Debug Information:");
+                    ui.small(format!("Processing: {}", self.is_processing));
+                    ui.small(format!("Voice Enabled: {}", self.voice_enabled));
+                    ui.small(format!("Command History Length: {}", self.command_history.len()));
+                });
+            }
+        });
+        
+        // Request repaint if processing
+        if self.is_processing {
+            ctx.request_repaint();
+        }
+    }
+}
+
+// We need to implement Clone for async operations
+impl Clone for LunaApp {
+    fn clone(&self) -> Self {
+        Self {
+            core: self.core.clone(),
+            command_input: self.command_input.clone(),
+            status: self.status.clone(),
+            is_processing: self.is_processing,
+            show_debug: self.show_debug,
+            command_history: self.command_history.clone(),
+            voice_enabled: self.voice_enabled,
+            current_screenshot: None, // Can't clone TextureHandle
+        }
+    }
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    // Initialize logging
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .with_target(false)
+        .init();
+
+    info!("🌙 Luna Visual AI starting...");
+
+    // Native window options
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([800.0, 600.0])
+            .with_min_inner_size([600.0, 400.0])
+            .with_icon(load_icon())
+            .with_resizable(true)
+            .with_title("Luna Visual AI"),
+        centered: true,
+        ..Default::default()
+    };
+
+    // Launch the native GUI application
+    eframe::run_native(
+        "Luna Visual AI",
+        options,
+        Box::new(|cc| Box::new(LunaApp::new(cc))),
+    )
+    .map_err(|e| anyhow::anyhow!("Failed to start Luna GUI: {}", e))?;
+
+    Ok(())
+}
+
+fn load_icon() -> egui::IconData {
+    // Embedded Luna icon (you can replace this with actual icon data)
+    egui::IconData {
+        rgba: vec![0; 32 * 32 * 4], // Placeholder - replace with actual icon
+        width: 32,
+        height: 32,
+    }
+}
