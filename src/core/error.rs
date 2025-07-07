@@ -1,380 +1,173 @@
 /*!
- * Luna Visual AI Error Types
- * 
- * Comprehensive error handling system for all Luna components.
- * Provides detailed error context, recovery suggestions, and
- * integration with Rust's Result type system.
+ * Luna Error Types - Comprehensive error handling
  */
 
-use std::fmt;
 use thiserror::Error;
 
-/// Main error type for Luna Visual AI operations
-/// 
-/// This enum covers all possible error conditions that can occur
-/// within Luna, providing detailed context and recovery suggestions.
+/// Luna-specific error types
 #[derive(Error, Debug)]
 pub enum LunaError {
-    /// AI model loading or inference errors
-    #[error("AI model error: {message}")]
-    AiModel {
-        message: String,
-        model_name: String,
-        recovery_suggestion: String,
-    },
-
-    /// Screen capture and vision system errors
-    #[error("Vision system error: {message}")]
-    Vision {
-        message: String,
-        component: String,
-        is_recoverable: bool,
-    },
-
-    /// Voice input and command processing errors
-    #[error("Input processing error: {message}")]
-    Input {
-        message: String,
-        input_type: InputType,
-    },
-
-    /// Visual overlay and UI errors
-    #[error("Overlay system error: {message}")]
-    Overlay {
-        message: String,
-        context: String,
-    },
-
-    /// Memory management and resource errors
-    #[error("Memory error: {message}")]
-    Memory {
-        message: String,
-        current_usage: u64,
-        limit: u64,
-    },
-
-    /// Configuration and setup errors
-    #[error("Configuration error: {message}")]
-    Config {
-        message: String,
-        config_key: Option<String>,
-    },
-
-    /// Windows API integration errors
-    #[error("Windows API error: {message} (Code: {error_code})")]
-    WindowsApi {
-        message: String,
-        error_code: u32,
-        api_name: String,
-    },
-
-    /// File system and I/O errors
-    #[error("I/O error: {message}")]
-    Io {
-        message: String,
-        path: Option<String>,
-    },
-
-    /// Network and external service errors
-    #[error("Network error: {message}")]
-    Network {
-        message: String,
-        endpoint: Option<String>,
-    },
-
-    /// Safety validation errors
-    #[error("Safety check failed: {message}")]
-    Safety {
-        message: String,
-        risk_level: RiskLevel,
-        user_override_allowed: bool,
-    },
-
-    /// Generic internal errors
-    #[error("Internal error: {message}")]
-    Internal {
-        message: String,
-        component: String,
-    },
-}
-
-/// Input type categorization for error reporting
-#[derive(Debug, Clone, Copy)]
-pub enum InputType {
-    Voice,
-    Text,
-    Hotkey,
-    Mouse,
-    Keyboard,
-}
-
-/// Risk level for safety errors
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum RiskLevel {
-    Low,
-    Medium,
-    High,
-    Critical,
-}
-
-impl fmt::Display for InputType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            InputType::Voice => write!(f, "voice"),
-            InputType::Text => write!(f, "text"),
-            InputType::Hotkey => write!(f, "hotkey"),
-            InputType::Mouse => write!(f, "mouse"),
-            InputType::Keyboard => write!(f, "keyboard"),
-        }
-    }
-}
-
-impl fmt::Display for RiskLevel {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            RiskLevel::Low => write!(f, "low"),
-            RiskLevel::Medium => write!(f, "medium"),
-            RiskLevel::High => write!(f, "high"),
-            RiskLevel::Critical => write!(f, "critical"),
-        }
-    }
+    #[error("AI model not found: {0}")]
+    ModelNotFound(String),
+    
+    #[error("AI inference failed: {0}")]
+    InferenceFailed(String),
+    
+    #[error("Screen capture failed: {0}")]
+    ScreenCaptureFailed(String),
+    
+    #[error("Unsafe command blocked: {0}")]
+    UnsafeCommand(String),
+    
+    #[error("Input system error: {0}")]
+    InputSystemError(String),
+    
+    #[error("Overlay error: {0}")]
+    OverlayError(String),
+    
+    #[error("Configuration error: {0}")]
+    ConfigError(String),
+    
+    #[error("Memory error: {0}")]
+    MemoryError(String),
+    
+    #[error("Timeout error: operation took too long")]
+    TimeoutError,
+    
+    #[error("No elements found matching: {0}")]
+    NoElementsFound(String),
+    
+    #[error("Multiple elements found, ambiguous: {0}")]
+    AmbiguousElements(String),
+    
+    #[error("Command cancelled by user")]
+    UserCancelled,
+    
+    #[error("System not ready: {0}")]
+    SystemNotReady(String),
+    
+    #[error("Windows API error: {0}")]
+    WindowsApiError(String),
+    
+    #[error("IO error: {0}")]
+    IoError(#[from] std::io::Error),
+    
+    #[error("Serialization error: {0}")]
+    SerializationError(#[from] serde_json::Error),
+    
+    #[error("Image processing error: {0}")]
+    ImageError(#[from] image::ImageError),
+    
+    #[error("Generic error: {0}")]
+    Generic(String),
 }
 
 impl LunaError {
-    /// Create a new AI model error
-    pub fn ai_model<S: Into<String>>(
-        message: S,
-        model_name: S,
-        recovery_suggestion: S,
-    ) -> Self {
-        Self::AiModel {
-            message: message.into(),
-            model_name: model_name.into(),
-            recovery_suggestion: recovery_suggestion.into(),
-        }
-    }
-
-    /// Create a new vision system error
-    pub fn vision<S: Into<String>>(
-        message: S,
-        component: S,
-        is_recoverable: bool,
-    ) -> Self {
-        Self::Vision {
-            message: message.into(),
-            component: component.into(),
-            is_recoverable,
-        }
-    }
-
-    /// Create a new input processing error
-    pub fn input<S: Into<String>>(message: S, input_type: InputType) -> Self {
-        Self::Input {
-            message: message.into(),
-            input_type,
-        }
-    }
-
-    /// Create a new overlay system error
-    pub fn overlay<S: Into<String>>(message: S, context: S) -> Self {
-        Self::Overlay {
-            message: message.into(),
-            context: context.into(),
-        }
-    }
-
-    /// Create a new memory error
-    pub fn memory<S: Into<String>>(
-        message: S,
-        current_usage: u64,
-        limit: u64,
-    ) -> Self {
-        Self::Memory {
-            message: message.into(),
-            current_usage,
-            limit,
-        }
-    }
-
-    /// Create a new configuration error
-    pub fn config<S: Into<String>>(
-        message: S,
-        config_key: Option<S>,
-    ) -> Self {
-        Self::Config {
-            message: message.into(),
-            config_key: config_key.map(|k| k.into()),
-        }
-    }
-
-    /// Create a new Windows API error
-    pub fn windows_api<S: Into<String>>(
-        message: S,
-        error_code: u32,
-        api_name: S,
-    ) -> Self {
-        Self::WindowsApi {
-            message: message.into(),
-            error_code,
-            api_name: api_name.into(),
-        }
-    }
-
-    /// Create a new I/O error
-    pub fn io<S: Into<String>>(message: S, path: Option<S>) -> Self {
-        Self::Io {
-            message: message.into(),
-            path: path.map(|p| p.into()),
-        }
-    }
-
-    /// Create a new safety error
-    pub fn safety<S: Into<String>>(
-        message: S,
-        risk_level: RiskLevel,
-        user_override_allowed: bool,
-    ) -> Self {
-        Self::Safety {
-            message: message.into(),
-            risk_level,
-            user_override_allowed,
-        }
-    }
-
-    /// Create a new internal error
-    pub fn internal<S: Into<String>>(message: S, component: S) -> Self {
-        Self::Internal {
-            message: message.into(),
-            component: component.into(),
-        }
-    }
-
-    /// Check if this error is recoverable
+    /// Check if error is recoverable
     pub fn is_recoverable(&self) -> bool {
         match self {
-            LunaError::Vision { is_recoverable, .. } => *is_recoverable,
-            LunaError::Memory { .. } => false, // Memory errors typically require restart
-            LunaError::Safety { risk_level, .. } => *risk_level < RiskLevel::Critical,
-            LunaError::WindowsApi { .. } => false, // API errors usually require restart
-            LunaError::AiModel { .. } => true, // AI models can often be reloaded
-            LunaError::Input { .. } => true,
-            LunaError::Overlay { .. } => true,
-            LunaError::Config { .. } => true,
-            LunaError::Io { .. } => true,
-            LunaError::Network { .. } => true,
-            LunaError::Internal { .. } => false,
+            LunaError::TimeoutError => true,
+            LunaError::UserCancelled => true,
+            LunaError::NoElementsFound(_) => true,
+            LunaError::AmbiguousElements(_) => true,
+            LunaError::SystemNotReady(_) => true,
+            _ => false,
         }
     }
-
-    /// Get suggested recovery action
-    pub fn recovery_suggestion(&self) -> String {
+    
+    /// Get user-friendly error message
+    pub fn user_message(&self) -> String {
         match self {
-            LunaError::AiModel { recovery_suggestion, .. } => {
-                recovery_suggestion.clone()
-            }
-            LunaError::Vision { component, is_recoverable, .. } => {
-                if *is_recoverable {
-                    format!("Try restarting the {} component", component)
-                } else {
-                    "Restart Luna application".to_string()
-                }
-            }
-            LunaError::Input { input_type, .. } => {
-                match input_type {
-                    InputType::Voice => "Check microphone connection and permissions".to_string(),
-                    InputType::Hotkey => "Check for conflicting hotkey assignments".to_string(),
-                    _ => "Retry the operation".to_string(),
-                }
-            }
-            LunaError::Memory { .. } => {
-                "Close other applications to free memory, then restart Luna".to_string()
-            }
-            LunaError::Safety { user_override_allowed, .. } => {
-                if *user_override_allowed {
-                    "Review the action and manually confirm if safe".to_string()
-                } else {
-                    "This action cannot be performed for safety reasons".to_string()
-                }
-            }
-            _ => "Try restarting Luna or contact support if the problem persists".to_string(),
+            LunaError::ModelNotFound(_) => "AI model not available. Please check your installation.".to_string(),
+            LunaError::InferenceFailed(_) => "AI processing failed. Please try again.".to_string(),
+            LunaError::ScreenCaptureFailed(_) => "Could not capture screen. Please check permissions.".to_string(),
+            LunaError::UnsafeCommand(cmd) => format!("Command '{}' is blocked for safety reasons.", cmd),
+            LunaError::InputSystemError(_) => "Input system error. Please try again.".to_string(),
+            LunaError::OverlayError(_) => "Display overlay error. Please try again.".to_string(),
+            LunaError::ConfigError(_) => "Configuration error. Please check your settings.".to_string(),
+            LunaError::MemoryError(_) => "Memory error. Please restart Luna.".to_string(),
+            LunaError::TimeoutError => "Operation timed out. Please try again.".to_string(),
+            LunaError::NoElementsFound(what) => format!("Could not find '{}'on screen. Please make sure it's visible.", what),
+            LunaError::AmbiguousElements(what) => format!("Found multiple '{}' elements. Please be more specific.", what),
+            LunaError::UserCancelled => "Command cancelled by user.".to_string(),
+            LunaError::SystemNotReady(_) => "Luna is still starting up. Please wait a moment.".to_string(),
+            LunaError::WindowsApiError(_) => "Windows system error. Please try again.".to_string(),
+            LunaError::IoError(_) => "File system error. Please check permissions.".to_string(),
+            LunaError::SerializationError(_) => "Data processing error. Please try again.".to_string(),
+            LunaError::ImageError(_) => "Image processing error. Please try again.".to_string(),
+            LunaError::Generic(msg) => msg.clone(),
         }
     }
-
-    /// Get the component that caused this error
-    pub fn component(&self) -> &str {
+    
+    /// Get error severity level
+    pub fn severity(&self) -> ErrorSeverity {
         match self {
-            LunaError::AiModel { model_name, .. } => model_name,
-            LunaError::Vision { component, .. } => component,
-            LunaError::Input { .. } => "input",
-            LunaError::Overlay { .. } => "overlay",
-            LunaError::Memory { .. } => "memory",
-            LunaError::Config { .. } => "config",
-            LunaError::WindowsApi { api_name, .. } => api_name,
-            LunaError::Io { .. } => "io",
-            LunaError::Network { .. } => "network",
-            LunaError::Safety { .. } => "safety",
-            LunaError::Internal { component, .. } => component,
+            LunaError::ModelNotFound(_) => ErrorSeverity::Critical,
+            LunaError::ConfigError(_) => ErrorSeverity::Critical,
+            LunaError::MemoryError(_) => ErrorSeverity::Critical,
+            LunaError::UnsafeCommand(_) => ErrorSeverity::High,
+            LunaError::WindowsApiError(_) => ErrorSeverity::High,
+            LunaError::InferenceFailed(_) => ErrorSeverity::Medium,
+            LunaError::ScreenCaptureFailed(_) => ErrorSeverity::Medium,
+            LunaError::InputSystemError(_) => ErrorSeverity::Medium,
+            LunaError::OverlayError(_) => ErrorSeverity::Low,
+            LunaError::TimeoutError => ErrorSeverity::Low,
+            LunaError::NoElementsFound(_) => ErrorSeverity::Low,
+            LunaError::AmbiguousElements(_) => ErrorSeverity::Low,
+            LunaError::UserCancelled => ErrorSeverity::Info,
+            LunaError::SystemNotReady(_) => ErrorSeverity::Info,
+            LunaError::IoError(_) => ErrorSeverity::Medium,
+            LunaError::SerializationError(_) => ErrorSeverity::Medium,
+            LunaError::ImageError(_) => ErrorSeverity::Medium,
+            LunaError::Generic(_) => ErrorSeverity::Medium,
         }
     }
 }
 
-/// Convert from standard I/O errors
-impl From<std::io::Error> for LunaError {
-    fn from(err: std::io::Error) -> Self {
-        LunaError::io(err.to_string(), None)
-    }
-}
-
-/// Convert from Windows API errors
-impl From<windows::core::Error> for LunaError {
-    fn from(err: windows::core::Error) -> Self {
-        LunaError::windows_api(
-            err.to_string(),
-            err.code().0 as u32,
-            "Windows API",
-        )
-    }
-}
-
-/// Convert from serde JSON errors
-impl From<serde_json::Error> for LunaError {
-    fn from(err: serde_json::Error) -> Self {
-        LunaError::config(
-            format!("JSON parsing error: {}", err),
-            None,
-        )
-    }
+/// Error severity levels
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorSeverity {
+    /// System cannot continue, requires restart
+    Critical,
+    /// Major functionality impaired
+    High,
+    /// Some functionality affected
+    Medium,
+    /// Minor issue, system can continue
+    Low,
+    /// Informational, not an error
+    Info,
 }
 
 /// Result type alias for Luna operations
-pub type Result<T> = std::result::Result<T, LunaError>;
+pub type LunaResult<T> = Result<T, LunaError>;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+/// Error context for debugging
+#[derive(Debug, Clone)]
+pub struct ErrorContext {
+    pub operation: String,
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+    pub user_command: Option<String>,
+    pub system_state: String,
+}
 
-    #[test]
-    fn test_error_creation() {
-        let error = LunaError::ai_model(
-            "Model failed to load",
-            "Florence-2",
-            "Download the model again",
-        );
-        
-        assert!(error.to_string().contains("Model failed to load"));
-        assert!(error.is_recoverable());
+impl ErrorContext {
+    pub fn new(operation: &str) -> Self {
+        Self {
+            operation: operation.to_string(),
+            timestamp: chrono::Utc::now(),
+            user_command: None,
+            system_state: "unknown".to_string(),
+        }
     }
-
-    #[test]
-    fn test_risk_level_ordering() {
-        assert!(RiskLevel::Low < RiskLevel::High);
-        assert!(RiskLevel::Critical > RiskLevel::Medium);
+    
+    pub fn with_command(mut self, command: &str) -> Self {
+        self.user_command = Some(command.to_string());
+        self
     }
-
-    #[test]
-    fn test_recovery_suggestions() {
-        let memory_error = LunaError::memory("Out of memory", 8_000_000_000, 4_000_000_000);
-        assert!(memory_error.recovery_suggestion().contains("free memory"));
-        assert!(!memory_error.is_recoverable());
+    
+    pub fn with_state(mut self, state: &str) -> Self {
+        self.system_state = state.to_string();
+        self
     }
 }
