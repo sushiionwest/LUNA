@@ -1,0 +1,316 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  
+  <!-- Luna Visual AI Installer Definition -->
+  <Product Id="*" 
+           Name="Luna Visual AI" 
+           Language="1033" 
+           Version="1.0.0" 
+           Manufacturer="Luna Team" 
+           UpgradeCode="12345678-1234-5678-9abc-123456789012">
+    
+    <Package InstallerVersion="200" 
+             Compressed="yes" 
+             InstallScope="perMachine"
+             Description="Luna Visual AI - One-Click Computer Assistant"
+             Comments="AI-powered computer automation assistant"
+             Manufacturer="Luna Team" />
+
+    <!-- Installation Media -->
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Feature Tree -->
+    <Feature Id="ProductFeature" Title="Luna Visual AI" Level="1">
+      <ComponentGroupRef Id="ProductComponents" />
+      <ComponentGroupRef Id="DesktopShortcuts" />
+      <ComponentGroupRef Id="StartMenuShortcuts" />
+      <ComponentGroupRef Id="RegistryEntries" />
+      <ComponentGroupRef Id="AutoUpdater" />
+    </Feature>
+
+    <!-- UI Configuration -->
+    <UI>
+      <UIRef Id="WixUI_Minimal" />
+      <Publish Dialog="ExitDialog" 
+               Control="Finish" 
+               Event="DoAction" 
+               Value="LaunchApplication">WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed</Publish>
+    </UI>
+
+    <Icon Id="luna.ico" SourceFile="assets/icons/luna.ico"/>
+    <Property Id="ARPPRODUCTICON" Value="luna.ico" />
+    
+    <!-- Launch Luna after install -->
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch Luna Visual AI" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+    
+    <CustomAction Id="LaunchApplication" 
+                  BinaryKey="WixCA" 
+                  DllEntry="WixShellExec" 
+                  Execute="immediate" 
+                  Return="ignore" 
+                  Impersonate="yes" />
+    
+    <Property Id="WixShellExecTarget" Value="[#luna.exe]" />
+
+    <!-- Windows Firewall Configuration -->
+    <util:FirewallException xmlns:util="http://schemas.microsoft.com/wix/UtilExtension"
+                            Id="LunaFirewall"
+                            Name="Luna Visual AI"
+                            Program="[INSTALLFOLDER]luna.exe"
+                            Scope="localSubnet"
+                            Protocol="tcp" />
+
+    <!-- Auto-start Registry Entry -->
+    <Property Id="AUTOSTART" Value="1" />
+    
+    <!-- Upgrade Logic -->
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    
+  </Product>
+
+  <!-- Installation Directory Structure -->
+  <Fragment>
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFilesFolder">
+        <Directory Id="INSTALLFOLDER" Name="Luna Visual AI">
+          
+          <!-- AI Models Directory -->
+          <Directory Id="MODELSDIR" Name="models" />
+          
+          <!-- Assets Directory -->
+          <Directory Id="ASSETSDIR" Name="assets">
+            <Directory Id="ICONSDIR" Name="icons" />
+            <Directory Id="SOUNDSDIR" Name="sounds" />
+          </Directory>
+          
+          <!-- Logs Directory -->
+          <Directory Id="LOGSDIR" Name="logs" />
+          
+          <!-- Plugins Directory (future) -->
+          <Directory Id="PLUGINSDIR" Name="plugins" />
+          
+        </Directory>
+      </Directory>
+      
+      <!-- Start Menu -->
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="Luna Visual AI" />
+      </Directory>
+      
+      <!-- Desktop -->
+      <Directory Id="DesktopFolder" Name="Desktop" />
+      
+      <!-- User Data Directory -->
+      <Directory Id="LocalAppDataFolder">
+        <Directory Id="USERDATADIR" Name="Luna" />
+      </Directory>
+      
+    </Directory>
+  </Fragment>
+
+  <!-- Core Application Components -->
+  <Fragment>
+    <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
+      
+      <!-- Main Executable -->
+      <Component Id="MainExecutable" Guid="11111111-1111-1111-1111-111111111111">
+        <File Id="luna.exe" 
+              Source="target/release/luna.exe" 
+              KeyPath="yes"
+              Checksum="yes">
+          <Shortcut Id="DesktopShortcut"
+                    Directory="DesktopFolder"
+                    Name="Luna Visual AI"
+                    Description="AI-powered computer assistant"
+                    Icon="luna.ico"
+                    WorkingDirectory="INSTALLFOLDER"
+                    Advertise="yes" />
+        </File>
+        
+        <!-- Windows Defender Exclusion -->
+        <RegistryValue Root="HKLM" 
+                       Key="SOFTWARE\Microsoft\Windows Defender\Exclusions\Processes" 
+                       Name="[INSTALLFOLDER]luna.exe" 
+                       Value="0" 
+                       Type="string" />
+      </Component>
+
+      <!-- Configuration Files -->
+      <Component Id="ConfigFiles" Guid="22222222-2222-2222-2222-222222222222">
+        <File Id="config.toml" Source="config/default.toml" />
+        <File Id="LICENSE" Source="LICENSE" />
+        <File Id="README.md" Source="README.md" />
+      </Component>
+
+      <!-- Auto-Updater -->
+      <Component Id="AutoUpdaterComponent" Guid="33333333-3333-3333-3333-333333333333">
+        <File Id="LunaUpdater.exe" Source="target/release/luna-updater.exe" />
+        
+        <!-- Auto-updater scheduled task -->
+        <util:TaskScheduler xmlns:util="http://schemas.microsoft.com/wix/UtilExtension"
+                            Id="LunaUpdateTask"
+                            Name="Luna Auto Updater"
+                            Description="Automatically updates Luna Visual AI"
+                            StartOnInstall="yes"
+                            LogonType="serviceAccount"
+                            Account="LocalSystem"
+                            WorkingDirectory="[INSTALLFOLDER]">
+          <util:WeeklySchedule Day="sunday" StartTime="02:00:00" />
+          <util:ExecAction Executable="[#LunaUpdater.exe]" Arguments="--check-updates" />
+        </util:TaskScheduler>
+      </Component>
+
+      <!-- Visual C++ Redistributable (if needed) -->
+      <Component Id="VCRedist" Guid="44444444-4444-4444-4444-444444444444">
+        <util:RegistrySearch xmlns:util="http://schemas.microsoft.com/wix/UtilExtension"
+                             Variable="VCRedistInstalled"
+                             Root="HKLM"
+                             Key="SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64"
+                             Value="Installed" />
+        
+        <!-- Only install if not present -->
+        <Condition>NOT VCRedistInstalled</Condition>
+        <File Id="vcredist_x64.exe" Source="deps/vcredist_x64.exe" />
+        
+        <CustomAction Id="InstallVCRedist"
+                      FileKey="vcredist_x64.exe"
+                      ExeCommand="/quiet /norestart"
+                      Execute="deferred"
+                      Return="check"
+                      Impersonate="no" />
+        
+        <InstallExecuteSequence>
+          <Custom Action="InstallVCRedist" After="InstallFiles">NOT VCRedistInstalled</Custom>
+        </InstallExecuteSequence>
+      </Component>
+
+    </ComponentGroup>
+  </Fragment>
+
+  <!-- Desktop Shortcuts -->
+  <Fragment>
+    <ComponentGroup Id="DesktopShortcuts" Directory="DesktopFolder">
+      <Component Id="DesktopShortcutComponent" Guid="55555555-5555-5555-5555-555555555555">
+        <RegistryValue Root="HKCU" 
+                       Key="Software\[Manufacturer]\[ProductName]" 
+                       Name="DesktopShortcut" 
+                       Value="1" 
+                       Type="integer" 
+                       KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+
+  <!-- Start Menu Shortcuts -->
+  <Fragment>
+    <ComponentGroup Id="StartMenuShortcuts" Directory="ApplicationProgramsFolder">
+      <Component Id="StartMenuComponent" Guid="66666666-6666-6666-6666-666666666666">
+        <Shortcut Id="ApplicationStartMenuShortcut"
+                  Name="Luna Visual AI"
+                  Description="AI-powered computer assistant"
+                  Target="[#luna.exe]"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="luna.ico" />
+        
+        <Shortcut Id="UninstallShortcut"
+                  Name="Uninstall Luna Visual AI"
+                  Description="Uninstall Luna Visual AI"
+                  Target="[SystemFolder]msiexec.exe"
+                  Arguments="/x [ProductCode]" />
+        
+        <RemoveFolder Id="ApplicationProgramsFolder" On="uninstall" />
+        
+        <RegistryValue Root="HKCU" 
+                       Key="Software\[Manufacturer]\[ProductName]" 
+                       Name="StartMenuShortcut" 
+                       Value="1" 
+                       Type="integer" 
+                       KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+
+  <!-- Registry Entries -->
+  <Fragment>
+    <ComponentGroup Id="RegistryEntries">
+      <Component Id="RegistryComponent" Guid="77777777-7777-7777-7777-777777777777" Directory="INSTALLFOLDER">
+        
+        <!-- Application Registration -->
+        <RegistryKey Root="HKLM" Key="SOFTWARE\Luna Team\Luna Visual AI">
+          <RegistryValue Type="string" Name="InstallPath" Value="[INSTALLFOLDER]" />
+          <RegistryValue Type="string" Name="Version" Value="1.0.0" />
+          <RegistryValue Type="string" Name="DisplayName" Value="Luna Visual AI" />
+        </RegistryKey>
+
+        <!-- URL Protocol for luna:// links -->
+        <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\luna">
+          <RegistryValue Type="string" Value="URL:Luna Protocol" />
+          <RegistryValue Type="string" Name="URL Protocol" Value="" />
+          <RegistryKey Key="DefaultIcon">
+            <RegistryValue Type="string" Value="[#luna.exe],0" />
+          </RegistryKey>
+          <RegistryKey Key="shell\open\command">
+            <RegistryValue Type="string" Value="&quot;[#luna.exe]&quot; &quot;%1&quot;" />
+          </RegistryKey>
+        </RegistryKey>
+
+        <!-- Auto-start Registry (optional) -->
+        <RegistryValue Root="HKCU" 
+                       Key="SOFTWARE\Microsoft\Windows\CurrentVersion\Run" 
+                       Name="Luna Visual AI" 
+                       Value="&quot;[#luna.exe]&quot; --minimized"
+                       Type="string">
+          <Condition>AUTOSTART = "1"</Condition>
+        </RegistryValue>
+
+        <!-- File Association for .luna files -->
+        <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\.luna">
+          <RegistryValue Type="string" Value="Luna.Script" />
+        </RegistryKey>
+        
+        <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\Luna.Script">
+          <RegistryValue Type="string" Value="Luna Script File" />
+          <RegistryKey Key="DefaultIcon">
+            <RegistryValue Type="string" Value="[#luna.exe],1" />
+          </RegistryKey>
+          <RegistryKey Key="shell\open\command">
+            <RegistryValue Type="string" Value="&quot;[#luna.exe]&quot; &quot;%1&quot;" />
+          </RegistryKey>
+        </RegistryKey>
+
+        <!-- Windows Search Integration -->
+        <RegistryKey Root="HKLM" Key="SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\luna.exe">
+          <RegistryValue Type="string" Value="[#luna.exe]" />
+          <RegistryValue Type="string" Name="Path" Value="[INSTALLFOLDER]" />
+        </RegistryKey>
+
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+
+  <!-- Auto-Updater Service -->
+  <Fragment>
+    <ComponentGroup Id="AutoUpdater" Directory="INSTALLFOLDER">
+      <Component Id="UpdaterService" Guid="88888888-8888-8888-8888-888888888888">
+        
+        <!-- Update Configuration -->
+        <RegistryKey Root="HKLM" Key="SOFTWARE\Luna Team\Luna Visual AI\Updates">
+          <RegistryValue Type="string" Name="UpdateChannel" Value="stable" />
+          <RegistryValue Type="string" Name="CheckInterval" Value="daily" />
+          <RegistryValue Type="integer" Name="AutoInstall" Value="1" />
+          <RegistryValue Type="string" Name="UpdateURL" Value="https://api.github.com/repos/sushiionwest/LUNA/releases/latest" />
+        </RegistryKey>
+
+        <!-- Update Check on Startup -->
+        <RegistryValue Root="HKCU" 
+                       Key="SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce" 
+                       Name="LunaFirstRun" 
+                       Value="&quot;[#LunaUpdater.exe]&quot; --first-run"
+                       Type="string" />
+
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+
+</Wix>
