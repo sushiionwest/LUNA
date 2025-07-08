@@ -1,0 +1,69 @@
+name: Manual Build Luna
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Build type'
+        required: true
+        default: 'release'
+        type: choice
+        options:
+        - release
+        - debug
+
+jobs:
+  build:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+      
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        target: x86_64-pc-windows-msvc
+        override: true
+        
+    - name: Build Luna
+      run: |
+        if ("${{ github.event.inputs.build_type }}" -eq "release") {
+          cargo build --release --target x86_64-pc-windows-msvc
+          $exe_path = "target\x86_64-pc-windows-msvc\release\luna.exe"
+        } else {
+          cargo build --target x86_64-pc-windows-msvc  
+          $exe_path = "target\x86_64-pc-windows-msvc\debug\luna.exe"
+        }
+        
+        echo "Build completed. Executable at: $exe_path"
+        
+        # Check if file exists and get size
+        if (Test-Path $exe_path) {
+          $size = (Get-Item $exe_path).Length / 1MB
+          echo "Luna.exe created successfully! Size: $([math]::Round($size, 2)) MB"
+        } else {
+          echo "ERROR: luna.exe not found!"
+          exit 1
+        }
+        
+    - name: Upload Luna Executable
+      uses: actions/upload-artifact@v3
+      with:
+        name: luna-${{ github.event.inputs.build_type }}
+        path: target/x86_64-pc-windows-msvc/${{ github.event.inputs.build_type }}/luna.exe
+        retention-days: 30
+        
+    - name: Build Summary
+      run: |
+        echo "🌙 Luna Visual AI Build Complete!"
+        echo ""
+        echo "✅ Executable: luna.exe"
+        echo "📂 Download from: Actions > Artifacts > luna-${{ github.event.inputs.build_type }}"
+        echo ""
+        echo "🚀 To use:"
+        echo "1. Download the artifact"
+        echo "2. Extract luna.exe"  
+        echo "3. Double-click to launch"
+        echo "4. Start giving commands!"

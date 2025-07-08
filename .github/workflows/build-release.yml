@@ -1,0 +1,151 @@
+name: Build and Release Luna Visual AI
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch: # Allow manual triggering
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+      
+    - name: Install Rust Toolchain
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        target: x86_64-pc-windows-msvc
+        override: true
+        components: rustfmt, clippy
+        
+    - name: Cache Cargo Dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        
+    - name: Install System Dependencies
+      run: |
+        # Install any additional Windows dependencies if needed
+        echo "Installing system dependencies..."
+        
+    - name: Build Luna Visual AI
+      run: |
+        echo "Building Luna Visual AI..."
+        cargo build --release --target x86_64-pc-windows-msvc
+        
+    - name: Test Build
+      run: |
+        echo "Testing build..."
+        # Run any quick tests to verify the build works
+        cargo test --release
+        
+    - name: Prepare Release Assets
+      run: |
+        echo "Preparing release assets..."
+        mkdir release-assets
+        copy "target\x86_64-pc-windows-msvc\release\luna.exe" "release-assets\luna.exe"
+        copy "README.md" "release-assets\"
+        copy "LUNA_COMPLETE_USER_EXPERIENCE.md" "release-assets\"
+        
+    - name: Create Release Archive
+      run: |
+        echo "Creating release archive..."
+        cd release-assets
+        powershell Compress-Archive -Path * -DestinationPath "../luna-visual-ai-windows.zip"
+        cd ..
+        
+    - name: Upload Build Artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: luna-visual-ai-windows
+        path: |
+          release-assets/luna.exe
+          release-assets/*.md
+          
+    - name: Create GitHub Release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          release-assets/luna.exe
+          luna-visual-ai-windows.zip
+        body: |
+          # 🌙 Luna Visual AI ${{ github.ref_name }}
+          
+          **One-click computer assistant with visual AI**
+          
+          ## 📥 Quick Start:
+          1. Download `luna.exe` below
+          2. Double-click to launch Luna
+          3. Type commands like "Close all browser tabs"
+          4. Watch Luna see and click for you!
+          
+          ## ✨ Features:
+          - 🤖 **Visual AI**: Sees your screen like a human using 4 AI models
+          - 🗣️ **Natural Language**: Just say what you want - no programming needed
+          - 🛡️ **Safety First**: 3-second countdown and preview before any action
+          - 🎯 **Multiple Ways to Interact**: Type, speak, or click examples
+          - 🚀 **One-Click Install**: No setup, no dependencies, just download and run
+          - 🏠 **100% Local**: All AI processing on your machine, no cloud required
+          
+          ## 🎯 Try These Commands:
+          - "Close all browser tabs"
+          - "Click the Save button"  
+          - "Take a screenshot"
+          - "Type 'Hello World'"
+          - "Open Control Panel"
+          
+          ## 🛡️ Safety Features:
+          - Visual preview of what Luna will click
+          - 3-second countdown to cancel actions
+          - Emergency stop button always visible
+          - Dangerous action warnings
+          
+          ## 💻 System Requirements:
+          - Windows 10 or 11
+          - 4GB RAM minimum
+          - No additional software needed
+          
+          ## 🆘 Having Issues?
+          Check out the documentation files included in the release for troubleshooting and usage guides.
+          
+          **Just download luna.exe and double-click to start using your AI assistant!** 🌙✨
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Optional: Build for other platforms in the future
+  build-linux:
+    runs-on: ubuntu-latest
+    if: false # Disabled for now, enable when ready for Linux support
+    
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+      
+    - name: Install Rust Toolchain
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        target: x86_64-unknown-linux-gnu
+        override: true
+        
+    - name: Build for Linux
+      run: cargo build --release --target x86_64-unknown-linux-gnu
+      
+    - name: Upload Linux Build
+      uses: actions/upload-artifact@v3
+      with:
+        name: luna-visual-ai-linux
+        path: target/x86_64-unknown-linux-gnu/release/luna
