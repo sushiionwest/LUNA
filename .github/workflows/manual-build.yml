@@ -21,11 +21,9 @@ jobs:
       uses: actions/checkout@v4
       
     - name: Install Rust
-      uses: actions-rs/toolchain@v1
+      uses: dtolnay/rust-toolchain@stable
       with:
-        toolchain: stable
-        target: x86_64-pc-windows-msvc
-        override: true
+        targets: x86_64-pc-windows-msvc
         
     - name: Build Luna
       run: |
@@ -49,7 +47,7 @@ jobs:
         }
         
     - name: Upload Luna Executable
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: luna-${{ github.event.inputs.build_type }}
         path: target/x86_64-pc-windows-msvc/${{ github.event.inputs.build_type }}/luna.exe
