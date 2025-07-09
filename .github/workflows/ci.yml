@@ -1,0 +1,236 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Test Suite
+    runs-on: windows-latest  # Windows required for platform-specific APIs
+    
+    strategy:
+      matrix:
+        rust: [stable, beta]
+        
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: ${{ matrix.rust }}
+        components: rustfmt, clippy
+        
+    - name: Cache cargo dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+
+    - name: Check formatting
+      run: cargo fmt --all -- --check
+      
+    - name: Run clippy
+      run: cargo clippy --all-targets --all-features -- -D warnings
+      
+    - name: Run tests
+      run: cargo test --verbose --all-features
+      
+    - name: Run integration tests
+      run: cargo test --test integration --verbose
+      
+    - name: Test safety system
+      run: cargo test safety --verbose
+      
+    - name: Run performance tests
+      run: cargo test performance --verbose
+
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      
+    - name: Install cargo-audit
+      run: cargo install cargo-audit
+      
+    - name: Run security audit
+      run: cargo audit
+      
+    - name: Run cargo-deny
+      uses: EmbarkStudios/cargo-deny-action@v1
+
+  build:
+    name: Build Release
+    runs-on: windows-latest
+    needs: [test, security]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      
+    - name: Build release
+      run: cargo build --release --verbose
+      
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4  # ✅ Fixed: Updated from v3 to v4
+      with:
+        name: luna-windows-release
+        path: |
+          target/release/luna.exe
+          target/release/deps/
+        retention-days: 30
+        
+    - name: Upload debug symbols
+      uses: actions/upload-artifact@v4  # ✅ Fixed: Updated from v3 to v4
+      with:
+        name: luna-debug-symbols
+        path: target/release/build/
+        retention-days: 7
+
+  documentation:
+    name: Build Documentation
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      
+    - name: Build documentation
+      run: cargo doc --no-deps --document-private-items
+      
+    - name: Upload documentation
+      uses: actions/upload-artifact@v4  # ✅ Fixed: Updated from v3 to v4
+      with:
+        name: luna-documentation
+        path: target/doc/
+        retention-days: 14
+
+  benchmark:
+    name: Performance Benchmarks
+    runs-on: windows-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      
+    - name: Run benchmarks
+      run: cargo bench --bench vision_pipeline
+      
+    - name: Upload benchmark results
+      uses: actions/upload-artifact@v4  # ✅ Fixed: Updated from v3 to v4
+      with:
+        name: benchmark-results
+        path: target/criterion/
+        retention-days: 7
+
+  release:
+    name: Create Release
+    runs-on: windows-latest
+    needs: [build, documentation]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4  # ✅ Fixed: Updated from v3 to v4
+      with:
+        name: luna-windows-release
+        path: ./release/
+        
+    - name: Download documentation
+      uses: actions/download-artifact@v4  # ✅ Fixed: Updated from v3 to v4
+      with:
+        name: luna-documentation
+        path: ./docs/
+        
+    - name: Create release package
+      run: |
+        mkdir luna-release
+        cp ./release/luna.exe luna-release/
+        cp README.md LICENSE luna-release/
+        cp -r ./docs luna-release/documentation
+        
+    - name: Upload release package
+      uses: actions/upload-artifact@v4  # ✅ Fixed: Updated from v3 to v4
+      with:
+        name: luna-release-package
+        path: luna-release/
+        
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          luna-release/luna.exe
+          luna-release/README.md
+          luna-release/LICENSE
+        generate_release_notes: true
+        draft: true  # Manual review before publishing
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  code_quality:
+    name: Code Quality Analysis
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+        
+    - name: Check code formatting
+      run: cargo fmt --all -- --check
+      
+    - name: Run clippy with strict settings
+      run: cargo clippy --all-targets --all-features -- -D warnings -D clippy::all -D clippy::pedantic
+      
+    - name: Check for TODO/FIXME comments
+      run: |
+        if grep -r "TODO\|FIXME" src/; then
+          echo "Found TODO/FIXME comments - consider addressing them"
+          grep -r "TODO\|FIXME" src/
+          exit 1
+        fi
+        
+    - name: Check license headers
+      run: |
+        echo "Checking for license headers..."
+        find src/ -name "*.rs" -exec grep -L "Copyright\|Licensed\|MIT" {} \; | tee missing_licenses.txt
+        if [ -s missing_licenses.txt ]; then
+          echo "Files missing license headers:"
+          cat missing_licenses.txt
+          # Don't fail for now, just warn
+        fi
