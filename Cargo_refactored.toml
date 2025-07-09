@@ -1,0 +1,97 @@
+[package]
+name = "luna"
+version = "1.0.0"
+edition = "2021"
+authors = ["Luna AI Team"]
+description = "Luna Visual AI - One-Click Computer Assistant"
+license = "MIT"
+repository = "https://github.com/sushiionwest/LUNA"
+readme = "README.md"
+keywords = ["ai", "computer-vision", "automation", "assistant", "rust"]
+categories = ["computer-vision", "gui", "multimedia"]
+
+[[bin]]
+name = "luna"
+path = "src/main.rs"
+
+[dependencies]
+# Core async runtime - minimal features
+tokio = { version = "1.35", features = ["rt", "macros", "time", "sync"] }
+futures-util = "0.3"
+
+# Lightweight image processing
+image = { version = "0.24", features = ["png", "jpeg"], default-features = false }
+
+# Windows System APIs - minimal set
+windows = { version = "0.52", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_System_Threading"
+] }
+
+# GUI Framework - optional and lightweight
+egui = { version = "0.24", default-features = false, optional = true }
+eframe = { version = "0.24", default-features = false, features = ["glow"], optional = true }
+
+# Minimal data serialization
+serde = { version = "1.0", features = ["derive"], default-features = false }
+serde_json = { version = "1.0", default-features = false }
+
+# Error handling
+anyhow = "1.0"
+
+# Logging - lightweight
+log = "0.4"
+env_logger = { version = "0.10", optional = true }
+
+# Concurrency - std primitives only
+once_cell = "1.19"
+
+# Essential utilities
+regex = { version = "1.10", default-features = false }
+
+[dev-dependencies]
+tokio-test = "0.4"
+tempfile = "3.8"
+
+[build-dependencies]
+winres = { version = "0.1", optional = true }
+
+# Optimized profile for small size
+[profile.release]
+lto = "thin"                   # Lighter LTO for faster builds
+codegen-units = 1              # Single codegen unit
+panic = "abort"                # Smaller binary size
+opt-level = "s"                # Optimize for size
+strip = "symbols"              # Remove debug symbols
+overflow-checks = false        # Performance over safety in release
+
+[profile.dev]
+opt-level = 0                  # No optimization in dev
+debug = true
+incremental = true
+
+# Minimal feature flags
+[features]
+default = []
+gui = ["egui", "eframe"]
+logging = ["env_logger"]
+windows-metadata = ["winres"]
+
+# Windows executable metadata
+[package.metadata.winres]
+FileDescription = "Luna Visual AI Assistant"
+CompanyName = "Luna Team"
+LegalCopyright = "© 2024 Luna Team"
+OriginalFilename = "luna.exe"
+ProductName = "Luna Visual AI"
+ProductVersion = "1.0.0"
+FileVersion = "1.0.0"
+InternalName = "luna"
+
+# Examples
+[[example]]
+name = "basic_usage"
+path = "examples/basic_usage.rs"
