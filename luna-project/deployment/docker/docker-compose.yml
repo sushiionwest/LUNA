@@ -1,0 +1,199 @@
+version: '3.8'
+
+# Luna Agent Development and Testing Environment
+# Implements Strategic Recommendation #4: Production Deployment Pipeline
+
+services:
+  luna-dev:
+    build:
+      context: ../..
+      dockerfile: deployment/docker/Dockerfile
+      target: luna-dev
+    container_name: luna-development
+    ports:
+      - "8080:8080"   # Luna API
+      - "3000:3000"   # Luna UI
+      - "22222:22"    # SSH
+      - "5900:5900"   # VNC
+    volumes:
+      - ../../:/luna-project
+      - luna-vm-data:/opt/luna-vm
+      - luna-screenshots:/opt/luna-agent/screenshots
+      - luna-downloads:/opt/luna-agent/downloads
+    environment:
+      - NODE_ENV=development
+      - LUNA_LOG_LEVEL=debug
+      - LUNA_API_PORT=8080
+      - LUNA_UI_PORT=3000
+    networks:
+      - luna-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  luna-test:
+    build:
+      context: ../..
+      dockerfile: deployment/docker/Dockerfile
+      target: luna-test
+    container_name: luna-testing
+    volumes:
+      - ../../testing:/luna-project/testing
+      - luna-test-results:/luna-project/testing/test-results
+    environment:
+      - NODE_ENV=test
+      - CI=true
+    networks:
+      - luna-network
+    profiles:
+      - testing
+
+  luna-vm-builder:
+    build:
+      context: ../..
+      dockerfile: deployment/docker/Dockerfile
+      target: luna-dev
+    container_name: luna-vm-builder
+    privileged: true  # Required for VirtualBox
+    volumes:
+      - ../../vm-assets:/luna-project/vm-assets
+      - luna-vm-builds:/opt/vm-builds
+      - /dev/vboxdrv:/dev/vboxdrv  # VirtualBox device
+    environment:
+      - VBOX_USER_HOME=/opt/vm-builds
+    networks:
+      - luna-network
+    profiles:
+      - vm-build
+
+  luna-testing-portal:
+    build:
+      context: ../..
+      dockerfile: deployment/docker/Dockerfile.testing-portal
+    container_name: luna-testing-portal
+    ports:
+      - "8081:8080"   # Testing portal
+    volumes:
+      - luna-test-data:/opt/testing-data
+    environment:
+      - NODE_ENV=production
+      - TESTING_DB_PATH=/opt/testing-data/testing.db
+    networks:
+      - luna-network
+    profiles:
+      - testing
+    depends_on:
+      - luna-database
+
+  luna-database:
+    image: postgres:15-alpine
+    container_name: luna-database
+    ports:
+      - "5432:5432"
+    volumes:
+      - luna-db-data:/var/lib/postgresql/data
+      - ../../deployment/database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    environment:
+      - POSTGRES_DB=luna_testing
+      - POSTGRES_USER=luna
+      - POSTGRES_PASSWORD=luna_secure_pass
+    networks:
+      - luna-network
+    profiles:
+      - testing
+      - production
+
+  luna-redis:
+    image: redis:7-alpine
+    container_name: luna-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - luna-redis-data:/data
+    networks:
+      - luna-network
+    profiles:
+      - testing
+      - production
+
+  luna-monitoring:
+    image: prom/prometheus:latest
+    container_name: luna-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ../../deployment/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - luna-prometheus-data:/prometheus
+    networks:
+      - luna-network
+    profiles:
+      - monitoring
+
+  luna-grafana:
+    image: grafana/grafana:latest
+    container_name: luna-grafana
+    ports:
+      - "3001:3000"
+    volumes:
+      - luna-grafana-data:/var/lib/grafana
+      - ../../deployment/monitoring/grafana:/etc/grafana/provisioning
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=luna_admin
+    networks:
+      - luna-network
+    profiles:
+      - monitoring
+    depends_on:
+      - luna-monitoring
+
+  luna-nginx:
+    image: nginx:alpine
+    container_name: luna-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ../../deployment/nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ../../deployment/nginx/ssl:/etc/nginx/ssl
+      - luna-static-files:/usr/share/nginx/html
+    networks:
+      - luna-network
+    profiles:
+      - production
+    depends_on:
+      - luna-dev
+      - luna-testing-portal
+
+volumes:
+  luna-vm-data:
+    driver: local
+  luna-vm-builds:
+    driver: local
+  luna-screenshots:
+    driver: local
+  luna-downloads:
+    driver: local
+  luna-test-results:
+    driver: local
+  luna-test-data:
+    driver: local
+  luna-db-data:
+    driver: local
+  luna-redis-data:
+    driver: local
+  luna-prometheus-data:
+    driver: local
+  luna-grafana-data:
+    driver: local
+  luna-static-files:
+    driver: local
+
+networks:
+  luna-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
