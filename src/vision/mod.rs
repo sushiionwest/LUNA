@@ -300,7 +300,7 @@ impl VisionPipeline {
         // Remove overlapping elements, keeping the one with higher confidence
         elements.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap());
         
-        let mut filtered = Vec::new();
+        let mut filtered: Vec<UIElement> = Vec::new();
         
         for element in elements {
             let mut overlaps = false;
@@ -326,13 +326,13 @@ impl VisionPipeline {
         filtered
     }
 
-    pub fn find_element_by_type(&self, elements: &[UIElement], element_type: ElementType) -> Vec<&UIElement> {
+    pub fn find_element_by_type<'a>(&self, elements: &'a [UIElement], element_type: ElementType) -> Vec<&'a UIElement> {
         elements.iter()
             .filter(|element| element.element_type == element_type)
             .collect()
     }
 
-    pub fn find_elements_in_region(&self, elements: &[UIElement], region: &Rectangle) -> Vec<&UIElement> {
+    pub fn find_elements_in_region<'a>(&self, elements: &'a [UIElement], region: &Rectangle) -> Vec<&'a UIElement> {
         elements.iter()
             .filter(|element| region.intersects(&element.bounds))
             .collect()
@@ -469,7 +469,8 @@ mod tests {
                 properties: HashMap::new(),
             },
             UIElement {
-                bounds: Rectangle::new(5.0, 5.0, 10.0, 10.0), // Overlaps with first
+                // Overlaps the first element by 64% (the filter threshold is 50%)
+                bounds: Rectangle::new(2.0, 2.0, 10.0, 10.0),
                 element_type: ElementType::Button,
                 confidence: 0.6,
                 properties: HashMap::new(),

@@ -142,6 +142,7 @@ impl ScreenCapture {
         self.create_test_pattern(1920, 1080)
     }
 
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
     fn create_dummy_screen(&self) -> Result<Image, CaptureError> {
         println!("Unsupported platform - creating dummy screen");
         self.create_test_pattern(1920, 1080)

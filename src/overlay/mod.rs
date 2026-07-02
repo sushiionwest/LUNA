@@ -482,7 +482,7 @@ pub fn create_simple_highlight(bounds: Rectangle, color: Color) -> OverlayManage
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vision::UIElement;
+    
 
     #[test]
     fn test_overlay_manager_creation() {

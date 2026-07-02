@@ -1,47 +1,33 @@
-// LUNA Library - Refactored with minimal dependencies
-// Provides a clean API for Visual AI automation
-
-//! # LUNA - Visual AI Assistant Library
+//! # LUNA
 //!
-//! LUNA is a refactored visual AI automation library designed with minimal dependencies
-//! while maintaining full functionality for screen analysis, UI element detection,
-//! and safe automation.
+//! A computer-use agent prototype: screen analysis through hand-written
+//! computer vision and guarded input automation.
 //!
-//! ## Features
-//!
-//! - **Computer Vision**: Custom image processing and UI element detection
-//! - **Safety System**: Advanced pattern matching and threat assessment
-//! - **Cross-platform**: Works on Windows, Linux, and macOS
-//! - **Minimal Dependencies**: Lightweight implementation with standard library focus
-//! - **Real-time Processing**: Efficient algorithms for live screen analysis
+//! Note: the CV pipeline and safety layers are implemented; the OS-level
+//! screen capture and input injection are currently placeholder stubs.
+//! See the README for an honest status overview.
 //!
 //! ## Quick Start
 //!
 //! ```rust
 //! use luna::{Luna, LunaConfig};
 //!
-//! let config = LunaConfig::default();
-//! let mut luna = Luna::new(config)?;
-//! luna.initialize()?;
-//!
-//! // Capture and analyze screen
-//! let image = luna.capture_screen()?;
-//! let ui_elements = luna.analyze_screen(&image)?;
-//!
-//! println!("Found {} UI elements", ui_elements.len());
-//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! # fn main() -> anyhow::Result<()> {
+//! let mut luna = Luna::new(LunaConfig::default())?;
+//! let analysis = luna.analyze_current_screen()?;
+//! println!("Found {} UI elements", analysis.elements.len());
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## Architecture
 //!
-//! The library is organized into several modules:
-//!
-//! - [`ai`] - Lightweight AI and computer vision
-//! - [`core`] - Main application logic and coordination
-//! - [`input`] - Cross-platform input handling with safety
-//! - [`utils`] - Utility functions (logging, geometry, caching)
+//! - [`core`] - Coordinator: command -> capture -> analyze -> validate -> act
+//! - [`ai`] - Screen analysis and rule-based action planning
 //! - [`vision`] - Screen capture and UI element detection
-//! - [`overlay`] - Visual feedback and highlighting system
+//! - [`input`] - Input actions with safety checks and rate limiting
+//! - [`overlay`] - Visual feedback data structures
+//! - [`utils`] - Geometry, image processing, logging
 
 pub mod ai;
 pub mod core;
@@ -66,25 +52,19 @@ pub use overlay::{create_ui_highlights, create_simple_highlight};
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const NAME: &str = env!("CARGO_PKG_NAME");
 
-/// Initialize the LUNA library with default configuration
-///
-/// This is a convenience function that creates a new LUNA instance
-/// with sensible defaults and initializes all subsystems.
+/// Initialize LUNA with default configuration
 ///
 /// # Example
 ///
 /// ```rust
-/// use luna;
-///
+/// # fn main() -> anyhow::Result<()> {
 /// let mut luna = luna::init()?;
-/// let elements = luna.analyze_current_screen()?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// let analysis = luna.analyze_current_screen()?;
+/// # Ok(())
+/// # }
 /// ```
-pub fn init() -> Result<Luna, LunaError> {
-    let config = LunaConfig::default();
-    let mut luna = Luna::new(config)?;
-    luna.initialize()?;
-    Ok(luna)
+pub fn init() -> anyhow::Result<Luna> {
+    Luna::new(LunaConfig::default())
 }
 
 /// Initialize LUNA with custom configuration
@@ -94,17 +74,16 @@ pub fn init() -> Result<Luna, LunaError> {
 /// ```rust
 /// use luna::{LunaConfig, init_with_config};
 ///
+/// # fn main() -> anyhow::Result<()> {
 /// let mut config = LunaConfig::default();
-/// config.enable_overlay = false;
-/// config.safety_level = luna::core::SafetyLevel::High;
+/// config.safety.enabled = true;
 ///
 /// let mut luna = init_with_config(config)?;
-/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// # Ok(())
+/// # }
 /// ```
-pub fn init_with_config(config: LunaConfig) -> Result<Luna, LunaError> {
-    let mut luna = Luna::new(config)?;
-    luna.initialize()?;
-    Ok(luna)
+pub fn init_with_config(config: LunaConfig) -> anyhow::Result<Luna> {
+    Luna::new(config)
 }
 
 /// Quick screen analysis without creating a full LUNA instance
@@ -209,9 +188,6 @@ fn get_enabled_features() -> Vec<String> {
         "screen-capture".to_string(),
     ];
 
-    #[cfg(feature = "test-mode")]
-    features.push("test-mode".to_string());
-
     #[cfg(target_os = "windows")]
     features.push("windows-input".to_string());
 
@@ -232,31 +208,6 @@ fn get_platform_info() -> PlatformInfo {
         supports_input: cfg!(any(target_os = "windows", target_os = "linux", target_os = "macos")),
     }
 }
-
-/// Error types that can be returned by the library
-#[derive(Debug)]
-pub enum LibraryError {
-    InitializationError(String),
-    ConfigurationError(String),
-    PlatformError(String),
-    FeatureNotAvailable(String),
-}
-
-impl std::fmt::Display for LibraryError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            LibraryError::InitializationError(msg) => write!(f, "Initialization error: {}", msg),
-            LibraryError::ConfigurationError(msg) => write!(f, "Configuration error: {}", msg),
-            LibraryError::PlatformError(msg) => write!(f, "Platform error: {}", msg),
-            LibraryError::FeatureNotAvailable(msg) => write!(f, "Feature not available: {}", msg),
-        }
-    }
-}
-
-impl std::error::Error for LibraryError {}
-
-/// Result type used throughout the library
-pub type Result<T> = std::result::Result<T, LibraryError>;
 
 // Integration tests helper functions (only available in test builds)
 #[cfg(test)]
@@ -294,80 +245,6 @@ pub mod test_utils {
     }
 }
 
-// Documentation examples
-#[cfg(doc)]
-mod examples {
-    //! # Examples
-    //! 
-    //! ## Basic Usage
-    //! 
-    //! ```rust
-    //! use luna::{Luna, LunaConfig};
-    //! 
-    //! // Initialize LUNA
-    //! let mut luna = Luna::new(LunaConfig::default())?;
-    //! luna.initialize()?;
-    //! 
-    //! // Analyze current screen
-    //! let image = luna.capture_screen()?;
-    //! let elements = luna.analyze_screen(&image)?;
-    //! 
-    //! // Find specific UI elements
-    //! let buttons = elements.iter()
-    //!     .filter(|e| e.element_type == luna::ElementType::Button)
-    //!     .collect::<Vec<_>>();
-    //! 
-    //! println!("Found {} buttons", buttons.len());
-    //! # Ok::<(), Box<dyn std::error::Error>>(())
-    //! ```
-    //! 
-    //! ## Using the Overlay System
-    //! 
-    //! ```rust
-    //! use luna::{OverlayManager, OverlayConfig, Color};
-    //! use luna::utils::geometry::Rectangle;
-    //! 
-    //! let mut overlay = OverlayManager::new(OverlayConfig::default());
-    //! 
-    //! // Highlight a region
-    //! let bounds = Rectangle::new(100.0, 100.0, 200.0, 50.0);
-    //! let color = Color::rgb(255, 0, 0);
-    //! overlay.add_highlight(bounds, color, Some("Important Button".to_string()));
-    //! 
-    //! // Get visible elements for rendering
-    //! let visible = overlay.get_visible_elements();
-    //! println!("Showing {} overlays", visible.len());
-    //! ```
-    //! 
-    //! ## Safety and Input Handling
-    //! 
-    //! ```rust
-    //! use luna::input::{InputController, BasicSafetyChecker, InputAction, ActionType};
-    //! use luna::utils::geometry::Point;
-    //! 
-    //! let safety_checker = Box::new(BasicSafetyChecker::new());
-    //! let mut input = InputController::new(safety_checker);
-    //! 
-    //! // Create a safe click action
-    //! let action = InputAction {
-    //!     action_type: ActionType::Click { 
-    //!         button: luna::input::MouseButton::Left 
-    //!     },
-    //!     target: luna::input::Target {
-    //!         x: 100,
-    //!         y: 200,
-    //!         element_type: Some("button".to_string()),
-    //!     },
-    //!     timestamp: std::time::Instant::now(),
-    //! };
-    //! 
-    //! // Execute with safety checks
-    //! match input.execute_action(action) {
-    //!     Ok(()) => println!("Action executed safely"),
-    //!     Err(e) => println!("Action blocked: {}", e),
-    //! }
-    //! ```
-}
 
 #[cfg(test)]
 mod tests {

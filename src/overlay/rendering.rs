@@ -292,7 +292,7 @@ impl Renderer {
     fn draw_text(&self, canvas: &mut Image, text: &str, position: Point, color: Color) -> Result<(), RenderError> {
         // Simple bitmap font rendering
         let char_width = 8;
-        let char_height = 12;
+        let _char_height = 12;
         let mut x_offset = 0;
 
         for ch in text.chars() {
@@ -481,7 +481,7 @@ impl std::error::Error for RenderError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::{OverlayElement, OverlayElementType};
+    use super::super::OverlayElement;
 
     #[test]
     fn test_renderer_creation() {

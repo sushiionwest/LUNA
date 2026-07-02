@@ -1,7 +1,7 @@
 // UI element detection with specialized algorithms
 // Advanced detection for different UI component types
 
-use crate::utils::geometry::{Point, Rectangle};
+use crate::utils::geometry::Rectangle;
 use crate::utils::image_processing::{Image, sobel_edge_detection, threshold, gaussian_blur};
 use super::{UIElement, ElementType, VisionError};
 use std::collections::HashMap;
@@ -663,10 +663,10 @@ impl MenuDetector {
         Self
     }
 
-    pub fn detect(&self, image: &Image) -> Result<Vec<UIElement>, VisionError> {
+    pub fn detect(&self, _image: &Image) -> Result<Vec<UIElement>, VisionError> {
         // Placeholder for menu detection
         // Menus typically have vertical lists of items with consistent spacing
-        let mut menus = Vec::new();
+        let menus = Vec::new();
         
         // For now, return empty vector
         // Real implementation would look for vertical arrangements of text/buttons
@@ -681,7 +681,7 @@ mod tests {
 
     #[test]
     fn test_ui_detector_creation() {
-        let detector = UIDetector::new();
+        let _detector = UIDetector::new();
         // Just verify it can be created without panicking
         assert!(true);
     }

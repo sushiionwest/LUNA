@@ -2,7 +2,7 @@
 // Custom implementation for text extraction from images
 
 use crate::utils::geometry::{Point, Rectangle};
-use crate::utils::image_processing::{Image, sobel_edge_detection, threshold, find_connected_components};
+use crate::utils::image_processing::{Image, threshold};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -30,7 +30,7 @@ pub struct TextRecognizer {
 }
 
 #[derive(Debug, Clone)]
-struct Pattern {
+pub struct Pattern {
     width: usize,
     height: usize,
     pixels: Vec<bool>,
@@ -93,7 +93,7 @@ impl TextRecognizer {
 
     pub fn recognize_text_in_region(&self, image: &Image, region: &Rectangle) -> Result<TextRegion, TextRecognitionError> {
         let cropped = image.crop(region);
-        let mut results = self.recognize_text(&cropped)?;
+        let results = self.recognize_text(&cropped)?;
         
         if results.is_empty() {
             return Ok(TextRegion {
@@ -106,7 +106,7 @@ impl TextRecognizer {
         }
         
         // Merge all recognized text from the region
-        let combined_text: String = results.iter().map(|r| &r.text).collect::<Vec<_>>().join(" ");
+        let combined_text: String = results.iter().map(|r| r.text.as_str()).collect::<Vec<_>>().join(" ");
         let avg_confidence = results.iter().map(|r| r.confidence).sum::<f64>() / results.len() as f64;
         
         Ok(TextRegion {
@@ -241,7 +241,7 @@ impl TextRecognizer {
                 
                 if char_width >= self.min_char_width && char_width <= self.max_char_width {
                     characters.push(Rectangle::new(
-                        (line.x + char_start as f64),
+                        line.x + char_start as f64,
                         line.y,
                         char_width as f64,
                         line.height,
@@ -257,7 +257,7 @@ impl TextRecognizer {
             let char_width = line_image.width - char_start;
             if char_width >= self.min_char_width && char_width <= self.max_char_width {
                 characters.push(Rectangle::new(
-                    (line.x + char_start as f64),
+                    line.x + char_start as f64,
                     line.y,
                     char_width as f64,
                     line.height,

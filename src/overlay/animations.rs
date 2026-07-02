@@ -1,8 +1,8 @@
 // Animation system for overlay elements
 // Custom animation framework with easing functions
 
-use super::{OverlayElement, Color, Animation, AnimationType};
-use crate::utils::geometry::{Point, Rectangle};
+use super::{OverlayElement, Animation, AnimationType};
+use crate::utils::geometry::Point;
 use std::time::{Duration, Instant};
 
 pub struct AnimationManager {
@@ -22,7 +22,7 @@ pub struct AnimationInstance {
     pub is_reversed: bool,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum EasingFunction {
     Linear,
     EaseIn,
@@ -533,8 +533,15 @@ mod tests {
         for easing in easing_functions {
             for &t in &test_values {
                 let result = apply_easing(t, easing);
-                assert!(result >= 0.0 && result <= 1.0 || (easing == EasingFunction::Back && result >= -0.1), 
-                       "Easing {:?} at t={} returned {}", easing, t, result);
+                // Back and Elastic legitimately overshoot the [0, 1] range;
+                // all other easings must stay inside it.
+                let overshooting = matches!(easing, EasingFunction::Back | EasingFunction::Elastic);
+                let in_range = if overshooting {
+                    (-0.5..=1.5).contains(&result)
+                } else {
+                    (0.0..=1.0).contains(&result)
+                };
+                assert!(in_range, "Easing {:?} at t={} returned {}", easing, t, result);
             }
         }
     }

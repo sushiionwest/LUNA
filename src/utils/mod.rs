@@ -353,36 +353,74 @@ impl Default for PerformanceMonitor {
 // Data serialization without external serialization crates
 pub fn serialize_simple_map(map: &HashMap<String, String>) -> String {
     map.iter()
-        .map(|(k, v)| format!("{}:{}", escape_colon(k), escape_colon(v)))
+        .map(|(k, v)| format!("{}:{}", escape_delimiters(k), escape_delimiters(v)))
         .collect::<Vec<_>>()
         .join(";")
 }
 
 pub fn deserialize_simple_map(data: &str) -> HashMap<String, String> {
     let mut map = HashMap::new();
-    
-    for pair in data.split(';') {
-        if let Some(colon_pos) = pair.find(':') {
-            let key = unescape_colon(&pair[..colon_pos]);
-            let value = unescape_colon(&pair[colon_pos + 1..]);
-            map.insert(key, value);
+
+    for pair in split_unescaped(data, ';') {
+        let fields = split_unescaped(&pair, ':');
+        if fields.len() == 2 {
+            map.insert(unescape_delimiters(&fields[0]), unescape_delimiters(&fields[1]));
         }
     }
-    
+
     map
 }
 
-fn escape_colon(s: &str) -> String {
-    s.replace(':', "\\:")
+/// Escape the pair/field delimiters. Backslash must be escaped first so
+/// the escapes introduced for ':' and ';' are not themselves re-escaped.
+fn escape_delimiters(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace(':', "\\:")
         .replace(';', "\\;")
-        .replace('\\', "\\\\")
 }
 
-fn unescape_colon(s: &str) -> String {
-    s.replace("\\\\", "\x00")
-        .replace("\\:", ":")
-        .replace("\\;", ";")
-        .replace('\x00', "\\")
+/// Split on a delimiter, ignoring delimiters preceded by a backslash.
+/// Escape sequences are preserved in the returned parts.
+fn split_unescaped(s: &str, delimiter: char) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut escaped = false;
+
+    for c in s.chars() {
+        if escaped {
+            current.push('\\');
+            current.push(c);
+            escaped = false;
+        } else if c == '\\' {
+            escaped = true;
+        } else if c == delimiter {
+            parts.push(std::mem::take(&mut current));
+        } else {
+            current.push(c);
+        }
+    }
+    if escaped {
+        current.push('\\');
+    }
+    parts.push(current);
+    parts
+}
+
+/// Undo `escape_delimiters`: each backslash escapes the following character.
+fn unescape_delimiters(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars();
+
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            if let Some(next) = chars.next() {
+                result.push(next);
+            }
+        } else {
+            result.push(c);
+        }
+    }
+    result
 }
 
 #[cfg(test)]
@@ -416,8 +454,8 @@ mod tests {
         cache.set("key1", "value1");
         cache.set("key2", "value2");
         
-        assert_eq!(cache.get(&"key1"), Some("value1".to_string()));
-        assert_eq!(cache.get(&"key2"), Some("value2".to_string()));
+        assert_eq!(cache.get(&"key1"), Some("value1"));
+        assert_eq!(cache.get(&"key2"), Some("value2"));
         
         // Test capacity limit
         cache.set("key3", "value3");

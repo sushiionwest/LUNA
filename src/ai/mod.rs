@@ -5,9 +5,9 @@
  */
 
 use anyhow::Result;
-use image::{DynamicImage, Rgb, RgbImage, Luma};
+use image::{DynamicImage, RgbImage};
 use std::collections::HashMap;
-use log::{debug, info, warn};
+use log::{debug, info};
 
 use crate::core::{ScreenAnalysis, ScreenElement, LunaAction, ElementBounds};
 
@@ -107,9 +107,11 @@ impl AICoordinator {
         info!("Screen analysis complete: {} elements detected in {}ms", 
               filtered_elements.len(), processing_time_ms);
 
+        let confidence = self.calculate_overall_confidence(&filtered_elements);
+
         Ok(ScreenAnalysis {
             elements: filtered_elements,
-            confidence: self.calculate_overall_confidence(&filtered_elements),
+            confidence,
             processing_time_ms,
             screen_size: (image.width(), image.height()),
         })
@@ -168,7 +170,7 @@ impl AICoordinator {
     }
 
     /// Find the best clickable element for a command
-    fn find_clickable_element(&self, command: &str, elements: &[ScreenElement]) -> Option<&ScreenElement> {
+    fn find_clickable_element<'a>(&self, command: &str, elements: &'a [ScreenElement]) -> Option<&'a ScreenElement> {
         // Look for specific element types mentioned in command
         let button_keywords = ["button", "click", "press"];
         let link_keywords = ["link", "navigate", "go to"];
@@ -314,8 +316,8 @@ impl VisionProcessor {
                 for dy in 0..3 {
                     for dx in 0..3 {
                         let pixel = gray_image.get_pixel(x + dx - 1, y + dy - 1)[0] as f32;
-                        gx += pixel * sobel_x[dy][dx] as f32;
-                        gy += pixel * sobel_y[dy][dx] as f32;
+                        gx += pixel * sobel_x[dy as usize][dx as usize] as f32;
+                        gy += pixel * sobel_y[dy as usize][dx as usize] as f32;
                     }
                 }
                 
@@ -480,8 +482,8 @@ impl VisionProcessor {
     }
 
     /// Calculate confidence for element classification
-    fn calculate_confidence(&self, rect: &ElementBounds, element_type: &str, aspect_ratio: f32, area: i32) -> f32 {
-        let mut confidence = 0.5;
+    fn calculate_confidence(&self, _rect: &ElementBounds, element_type: &str, aspect_ratio: f32, area: i32) -> f32 {
+        let mut confidence: f32 = 0.5;
         
         // Boost confidence based on element type characteristics
         match element_type {
@@ -548,4 +550,3 @@ impl Default for VisionProcessor {
 }
 
 // Re-export for backward compatibility
-pub use AICoordinator as AIVisionPipeline;
