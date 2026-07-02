@@ -1,31 +1,34 @@
 /*!
- * Luna AI Pipeline - Computer Vision and Natural Language Processing
+ * Luna AI - Lightweight Computer Vision and Pattern Recognition
  * 
- * Handles screen analysis, element detection, and action planning
+ * Simplified AI pipeline using basic computer vision algorithms instead of heavy ML models
  */
 
 use anyhow::Result;
-use image::{DynamicImage, RgbaImage};
-use std::sync::Arc;
-use tracing::{info, debug, error};
-
-pub mod pipeline;
-pub mod model_manager;
-pub mod clip;
-pub mod florence;
-pub mod sam;
-pub mod trocr;
+use image::{DynamicImage, Rgb, RgbImage, Luma};
+use std::collections::HashMap;
+use log::{debug, info, warn};
 
 use crate::core::{ScreenAnalysis, ScreenElement, LunaAction, ElementBounds};
 
-pub use pipeline::AIVisionPipeline;
+/// Lightweight AI coordinator for screen analysis and action planning
+pub struct AICoordinator {
+    /// Confidence threshold for element detection
+    confidence_threshold: f32,
+    /// Maximum number of elements to detect
+    max_elements: usize,
+    /// Processing statistics
+    stats: ProcessingStats,
+}
 
-/// AI processing result
-#[derive(Debug, Clone)]
-pub struct AIResult {
-    pub elements: Vec<ScreenElement>,
-    pub confidence: f32,
-    pub processing_time_ms: u64,
+/// Lightweight computer vision model for UI element detection
+pub struct VisionProcessor {
+    /// Edge detection sensitivity
+    edge_threshold: f32,
+    /// Minimum element size (pixels)
+    min_element_size: u32,
+    /// Element classification rules
+    classification_rules: HashMap<String, ClassificationRule>,
 }
 
 /// Element detection result
@@ -35,412 +38,514 @@ pub struct ElementDetection {
     pub bounds: ElementBounds,
     pub confidence: f32,
     pub text: Option<String>,
-    pub attributes: std::collections::HashMap<String, String>,
+    pub attributes: HashMap<String, String>,
 }
 
-/// Action planning result
+/// Classification rule for UI elements
 #[derive(Debug, Clone)]
-pub struct ActionPlan {
-    pub actions: Vec<LunaAction>,
-    pub confidence: f32,
-    pub explanation: String,
+struct ClassificationRule {
+    pub aspect_ratio_min: f32,
+    pub aspect_ratio_max: f32,
+    pub area_min: i32,
+    pub area_max: i32,
+    pub brightness_threshold: Option<f32>,
 }
 
-/// AI model interface
-pub trait AIModel {
-    fn name(&self) -> &str;
-    fn is_loaded(&self) -> bool;
-    fn load(&mut self) -> Result<()>;
-    fn unload(&mut self);
-}
-
-/// Vision model interface for screen analysis
-pub trait VisionModel: AIModel {
-    fn analyze_screen(&self, image: &DynamicImage) -> Result<Vec<ElementDetection>>;
-    fn detect_text(&self, image: &DynamicImage) -> Result<String>;
-    fn find_elements(&self, image: &DynamicImage, query: &str) -> Result<Vec<ElementDetection>>;
-}
-
-/// Language model interface for command understanding
-pub trait LanguageModel: AIModel {
-    fn understand_command(&self, command: &str, context: &ScreenAnalysis) -> Result<ActionPlan>;
-    fn match_elements(&self, command: &str, elements: &[ScreenElement]) -> Result<Vec<usize>>;
-}
-
-/// Main AI coordinator
-pub struct AICoordinator {
-    vision_models: Vec<Box<dyn VisionModel + Send + Sync>>,
-    language_models: Vec<Box<dyn LanguageModel + Send + Sync>>,
-    model_manager: Arc<model_manager::ModelManager>,
+/// Processing statistics
+#[derive(Debug, Default, Clone)]
+pub struct ProcessingStats {
+    pub images_processed: u64,
+    pub elements_detected: u64,
+    pub total_processing_time_ms: u64,
+    pub average_processing_time_ms: f64,
 }
 
 impl AICoordinator {
-    pub async fn new() -> Result<Self> {
-        info!("Initializing AI coordinator...");
-        
-        let model_manager = Arc::new(model_manager::ModelManager::new().await?);
-        
-        let mut coordinator = Self {
-            vision_models: Vec::new(),
-            language_models: Vec::new(),
-            model_manager,
-        };
-        
-        // Initialize vision models
-        coordinator.init_vision_models().await?;
-        
-        // Initialize language models
-        coordinator.init_language_models().await?;
-        
-        info!("AI coordinator initialized with {} vision models and {} language models", 
-              coordinator.vision_models.len(), 
-              coordinator.language_models.len());
-        
-        Ok(coordinator)
-    }
-    
-    async fn init_vision_models(&mut self) -> Result<()> {
-        // Add CLIP model for general vision understanding
-        let clip_model = Box::new(clip::CLIPModel::new(&self.model_manager).await?);
-        self.vision_models.push(clip_model);
-        
-        // Add Florence-2 for detailed scene understanding  
-        let florence_model = Box::new(florence::FlorenceModel::new(&self.model_manager).await?);
-        self.vision_models.push(florence_model);
-        
-        // Add TrOCR for text recognition
-        let trocr_model = Box::new(trocr::TrOCRModel::new(&self.model_manager).await?);
-        self.vision_models.push(trocr_model);
-        
-        Ok(())
-    }
-    
-    async fn init_language_models(&mut self) -> Result<()> {
-        // For now, we'll use a simple rule-based language model
-        // In the future, we could add a proper LLM here
-        Ok(())
-    }
-    
-    /// Analyze screen image and extract elements
-    pub async fn analyze_screen(&self, image: &DynamicImage, command: &str) -> Result<ScreenAnalysis> {
-        let start_time = std::time::Instant::now();
-        debug!("Starting screen analysis for command: '{}'", command);
-        
-        let mut all_elements = Vec::new();
-        let mut text_content = String::new();
-        
-        // Run all vision models in parallel
-        let mut tasks = Vec::new();
-        
-        for model in &self.vision_models {
-            let image_clone = image.clone();
-            let model_name = model.name().to_string();
-            
-            // Run each model (in a real async implementation, these would be futures)
-            match model.analyze_screen(&image_clone) {
-                Ok(detections) => {
-                    debug!("Model '{}' found {} elements", model_name, detections.len());
-                    
-                    // Convert detections to screen elements
-                    for detection in detections {
-                        let element = ScreenElement {
-                            element_type: detection.element_type,
-                            text: detection.text.clone(),
-                            bounds: detection.bounds,
-                            confidence: detection.confidence,
-                            clickable: self.is_clickable(&detection.element_type),
-                        };
-                        all_elements.push(element);
-                        
-                        // Collect text content
-                        if let Some(text) = detection.text {
-                            text_content.push_str(&text);
-                            text_content.push(' ');
-                        }
-                    }
-                }
-                Err(e) => {
-                    error!("Model '{}' failed: {}", model_name, e);
-                }
-            }
+    /// Create new AI coordinator
+    pub fn new() -> Self {
+        Self {
+            confidence_threshold: 0.6,
+            max_elements: 50,
+            stats: ProcessingStats::default(),
         }
+    }
+
+    /// Analyze screen image and detect UI elements
+    pub fn analyze_screen(&mut self, image: &DynamicImage) -> Result<ScreenAnalysis> {
+        let start_time = std::time::Instant::now();
         
-        // Deduplicate and merge similar elements
-        all_elements = self.deduplicate_elements(all_elements);
+        debug!("Starting screen analysis {}x{}", image.width(), image.height());
         
-        let processing_time = start_time.elapsed().as_millis() as u64;
+        // Use lightweight computer vision processor
+        let mut vision = VisionProcessor::new();
+        let elements = vision.detect_elements(image)?;
         
-        debug!("Screen analysis completed in {}ms, found {} unique elements", 
-               processing_time, all_elements.len());
+        // Filter by confidence threshold
+        let filtered_elements: Vec<ScreenElement> = elements
+            .into_iter()
+            .filter(|e| e.confidence >= self.confidence_threshold)
+            .take(self.max_elements)
+            .map(|e| ScreenElement {
+                element_type: e.element_type,
+                bounds: e.bounds,
+                confidence: e.confidence,
+                text: e.text,
+                attributes: e.attributes,
+            })
+            .collect();
+
+        let processing_time = start_time.elapsed();
+        let processing_time_ms = processing_time.as_millis() as u64;
         
+        // Update statistics
+        self.stats.images_processed += 1;
+        self.stats.elements_detected += filtered_elements.len() as u64;
+        self.stats.total_processing_time_ms += processing_time_ms;
+        self.stats.average_processing_time_ms = 
+            self.stats.total_processing_time_ms as f64 / self.stats.images_processed as f64;
+
+        info!("Screen analysis complete: {} elements detected in {}ms", 
+              filtered_elements.len(), processing_time_ms);
+
         Ok(ScreenAnalysis {
-            elements: all_elements,
-            text_content: text_content.trim().to_string(),
-            screenshot_hash: self.calculate_image_hash(image),
-            analysis_time_ms: processing_time,
+            elements: filtered_elements,
+            confidence: self.calculate_overall_confidence(&filtered_elements),
+            processing_time_ms,
+            screen_size: (image.width(), image.height()),
         })
     }
-    
-    /// Plan actions based on analysis and command
-    pub async fn plan_actions(&self, analysis: &ScreenAnalysis, command: &str) -> Result<Vec<LunaAction>> {
+
+    /// Plan actions based on user command and screen analysis
+    pub fn plan_actions(&self, command: &str, analysis: &ScreenAnalysis) -> Result<Vec<LunaAction>> {
         debug!("Planning actions for command: '{}'", command);
         
-        let actions = self.parse_command_to_actions(command, analysis)?;
-        
+        let command_lower = command.to_lowercase();
+        let mut actions = Vec::new();
+
+        // Simple command parsing and action planning
+        if command_lower.contains("click") {
+            if let Some(element) = self.find_clickable_element(&command_lower, &analysis.elements) {
+                let center_x = element.bounds.x + element.bounds.width / 2;
+                let center_y = element.bounds.y + element.bounds.height / 2;
+                
+                actions.push(LunaAction::Click { 
+                    x: center_x, 
+                    y: center_y 
+                });
+            }
+        } else if command_lower.contains("type") || command_lower.contains("enter") {
+            if let Some(text) = self.extract_text_from_command(&command) {
+                actions.push(LunaAction::Type { text });
+            }
+        } else if command_lower.contains("scroll") {
+            let direction = if command_lower.contains("up") { "up" }
+                          else if command_lower.contains("down") { "down" }
+                          else { "down" };
+            
+            actions.push(LunaAction::Scroll { 
+                direction: direction.to_string(),
+                amount: 3 
+            });
+        }
+
         debug!("Planned {} actions", actions.len());
         Ok(actions)
     }
-    
-    /// Simple command parsing (can be enhanced with LLM)
-    fn parse_command_to_actions(&self, command: &str, analysis: &ScreenAnalysis) -> Result<Vec<LunaAction>> {
-        let command_lower = command.to_lowercase();
-        let mut actions = Vec::new();
-        
-        // Close all tabs
-        if command_lower.contains("close") && command_lower.contains("tab") {
-            let close_buttons = self.find_close_buttons(&analysis.elements);
-            for button in close_buttons {
-                actions.push(LunaAction::Click {
-                    x: button.bounds.x + button.bounds.width / 2,
-                    y: button.bounds.y + button.bounds.height / 2,
-                });
-                actions.push(LunaAction::Wait { milliseconds: 100 });
-            }
-        }
-        
-        // Click specific element
-        else if command_lower.starts_with("click") {
-            let target = command_lower.strip_prefix("click").unwrap_or("").trim();
-            if let Some(element) = self.find_element_by_text(&analysis.elements, target) {
-                actions.push(LunaAction::Click {
-                    x: element.bounds.x + element.bounds.width / 2,
-                    y: element.bounds.y + element.bounds.height / 2,
-                });
-            }
-        }
-        
-        // Type text
-        else if command_lower.starts_with("type") {
-            let text = command.strip_prefix("type").unwrap_or("").trim();
-            if !text.is_empty() {
-                actions.push(LunaAction::Type {
-                    text: text.to_string(),
-                });
-            }
-        }
-        
-        // Key combinations
-        else if command_lower.contains("ctrl") || command_lower.contains("alt") {
-            let keys = self.parse_key_combination(&command_lower);
-            if !keys.is_empty() {
-                actions.push(LunaAction::KeyCombo { keys });
-            }
-        }
-        
-        // Scroll
-        else if command_lower.contains("scroll") {
-            let direction = if command_lower.contains("down") {
-                crate::core::ScrollDirection::Down
-            } else if command_lower.contains("up") {
-                crate::core::ScrollDirection::Up
-            } else {
-                crate::core::ScrollDirection::Down
-            };
-            
-            actions.push(LunaAction::Scroll {
-                x: 500, // Center of typical screen
-                y: 400,
-                direction,
-            });
-        }
-        
-        // Default: try to find and click the mentioned element
-        else {
-            if let Some(element) = self.find_best_match(&analysis.elements, &command_lower) {
-                actions.push(LunaAction::Click {
-                    x: element.bounds.x + element.bounds.width / 2,
-                    y: element.bounds.y + element.bounds.height / 2,
-                });
-            }
-        }
-        
-        if actions.is_empty() {
-            return Err(anyhow::anyhow!("Could not understand command: {}", command));
-        }
-        
-        Ok(actions)
+
+    /// Get processing statistics
+    pub fn get_stats(&self) -> &ProcessingStats {
+        &self.stats
     }
-    
-    fn find_close_buttons(&self, elements: &[ScreenElement]) -> Vec<&ScreenElement> {
-        elements.iter()
-            .filter(|e| {
-                e.element_type == "button" && 
-                e.text.as_ref().map_or(false, |t| t.contains("×") || t.contains("close"))
-            })
-            .collect()
-    }
-    
-    fn find_element_by_text(&self, elements: &[ScreenElement], target: &str) -> Option<&ScreenElement> {
-        elements.iter()
-            .find(|e| {
-                e.text.as_ref().map_or(false, |t| 
-                    t.to_lowercase().contains(target) || 
-                    target.contains(&t.to_lowercase())
-                )
-            })
-    }
-    
-    fn find_best_match(&self, elements: &[ScreenElement], command: &str) -> Option<&ScreenElement> {
-        let mut best_match = None;
-        let mut best_score = 0.0;
+
+    /// Calculate overall confidence from detected elements
+    fn calculate_overall_confidence(&self, elements: &[ScreenElement]) -> f32 {
+        if elements.is_empty() {
+            return 0.0;
+        }
         
+        let total_confidence: f32 = elements.iter().map(|e| e.confidence).sum();
+        total_confidence / elements.len() as f32
+    }
+
+    /// Find the best clickable element for a command
+    fn find_clickable_element(&self, command: &str, elements: &[ScreenElement]) -> Option<&ScreenElement> {
+        // Look for specific element types mentioned in command
+        let button_keywords = ["button", "click", "press"];
+        let link_keywords = ["link", "navigate", "go to"];
+        
+        // First, try to find elements by type preference
+        for keyword in &button_keywords {
+            if command.contains(keyword) {
+                if let Some(button) = elements.iter().find(|e| e.element_type == "button") {
+                    return Some(button);
+                }
+            }
+        }
+        
+        for keyword in &link_keywords {
+            if command.contains(keyword) {
+                if let Some(link) = elements.iter().find(|e| e.element_type == "link") {
+                    return Some(link);
+                }
+            }
+        }
+
+        // Look for text matches
         for element in elements {
-            if !element.clickable {
+            if let Some(text) = &element.text {
+                let text_lower = text.to_lowercase();
+                for word in command.split_whitespace() {
+                    if text_lower.contains(word) && word.len() > 2 {
+                        return Some(element);
+                    }
+                }
+            }
+        }
+
+        // Fall back to first clickable element
+        elements.iter()
+            .find(|e| matches!(e.element_type.as_str(), "button" | "link" | "icon"))
+    }
+
+    /// Extract text to type from command
+    fn extract_text_from_command(&self, command: &str) -> Option<String> {
+        // Simple text extraction - look for quoted text or text after "type"
+        if let Some(start) = command.find('"') {
+            if let Some(end) = command[start + 1..].find('"') {
+                return Some(command[start + 1..start + 1 + end].to_string());
+            }
+        }
+
+        // Look for text after "type" keyword
+        if let Some(type_pos) = command.to_lowercase().find("type") {
+            let after_type = &command[type_pos + 4..].trim();
+            if !after_type.is_empty() {
+                return Some(after_type.to_string());
+            }
+        }
+
+        None
+    }
+}
+
+impl VisionProcessor {
+    /// Create new vision processor with default settings
+    pub fn new() -> Self {
+        let mut classification_rules = HashMap::new();
+        
+        // Button classification rules
+        classification_rules.insert("button".to_string(), ClassificationRule {
+            aspect_ratio_min: 1.5,
+            aspect_ratio_max: 5.0,
+            area_min: 800,
+            area_max: 8000,
+            brightness_threshold: Some(180.0),
+        });
+
+        // Text field classification rules
+        classification_rules.insert("textfield".to_string(), ClassificationRule {
+            aspect_ratio_min: 3.0,
+            aspect_ratio_max: 10.0,
+            area_min: 1500,
+            area_max: 15000,
+            brightness_threshold: Some(200.0),
+        });
+
+        // Icon classification rules
+        classification_rules.insert("icon".to_string(), ClassificationRule {
+            aspect_ratio_min: 0.8,
+            aspect_ratio_max: 1.2,
+            area_min: 100,
+            area_max: 2000,
+            brightness_threshold: None,
+        });
+
+        Self {
+            edge_threshold: 30.0,
+            min_element_size: 20,
+            classification_rules,
+        }
+    }
+
+    /// Detect UI elements in image using lightweight computer vision
+    pub fn detect_elements(&mut self, image: &DynamicImage) -> Result<Vec<ElementDetection>> {
+        let mut elements = Vec::new();
+        
+        // Convert to RGB for processing
+        let rgb_image = image.to_rgb8();
+        
+        // Step 1: Edge detection using Sobel operator
+        let edges = self.detect_edges(&rgb_image);
+        
+        // Step 2: Find rectangular regions from edges
+        let rectangles = self.find_rectangles(&edges, image.width(), image.height());
+        
+        // Step 3: Classify each rectangle as UI element
+        for rect in rectangles {
+            if let Some(element) = self.classify_element(&rect, &rgb_image) {
+                elements.push(element);
+            }
+        }
+
+        // Sort by confidence and limit results
+        elements.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
+        elements.truncate(50);
+
+        debug!("Detected {} UI elements", elements.len());
+        Ok(elements)
+    }
+
+    /// Detect edges using Sobel operator
+    fn detect_edges(&self, image: &RgbImage) -> Vec<(u32, u32)> {
+        let gray_image = DynamicImage::ImageRgb8(image.clone()).to_luma8();
+        let (width, height) = gray_image.dimensions();
+        let mut edges = Vec::new();
+        
+        // Sobel kernels
+        let sobel_x = [[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]];
+        let sobel_y = [[-1, -2, -1], [0, 0, 0], [1, 2, 1]];
+        
+        for y in 1..height-1 {
+            for x in 1..width-1 {
+                let mut gx = 0.0;
+                let mut gy = 0.0;
+                
+                // Apply Sobel kernels
+                for dy in 0..3 {
+                    for dx in 0..3 {
+                        let pixel = gray_image.get_pixel(x + dx - 1, y + dy - 1)[0] as f32;
+                        gx += pixel * sobel_x[dy][dx] as f32;
+                        gy += pixel * sobel_y[dy][dx] as f32;
+                    }
+                }
+                
+                let magnitude = (gx * gx + gy * gy).sqrt();
+                
+                if magnitude > self.edge_threshold {
+                    edges.push((x, y));
+                }
+            }
+        }
+        
+        edges
+    }
+
+    /// Find rectangular regions from edge points
+    fn find_rectangles(&self, edges: &[(u32, u32)], width: u32, height: u32) -> Vec<ElementBounds> {
+        let mut rectangles = Vec::new();
+        let mut visited = std::collections::HashSet::new();
+        
+        for &(x, y) in edges {
+            if visited.contains(&(x, y)) {
                 continue;
             }
             
-            let score = self.calculate_match_score(element, command);
-            if score > best_score {
-                best_score = score;
-                best_match = Some(element);
+            if let Some(rect) = self.grow_rectangle_from_point(x, y, edges, &mut visited) {
+                // Validate rectangle size
+                if rect.width >= self.min_element_size as i32 && 
+                   rect.height >= (self.min_element_size / 2) as i32 &&
+                   rect.width <= (width / 2) as i32 && 
+                   rect.height <= (height / 2) as i32 {
+                    rectangles.push(rect);
+                }
             }
         }
         
-        if best_score > 0.3 { // Minimum confidence threshold
-            best_match
+        rectangles
+    }
+
+    /// Grow a rectangle from an edge point using connected components
+    fn grow_rectangle_from_point(
+        &self,
+        start_x: u32, 
+        start_y: u32, 
+        edges: &[(u32, u32)], 
+        visited: &mut std::collections::HashSet<(u32, u32)>
+    ) -> Option<ElementBounds> {
+        let mut min_x = start_x;
+        let mut max_x = start_x;
+        let mut min_y = start_y;
+        let mut max_y = start_y;
+        
+        let mut stack = vec![(start_x, start_y)];
+        let mut component_size = 0;
+        
+        while let Some((x, y)) = stack.pop() {
+            if visited.contains(&(x, y)) || component_size > 1000 {
+                continue;
+            }
+            
+            visited.insert((x, y));
+            component_size += 1;
+            
+            min_x = min_x.min(x);
+            max_x = max_x.max(x);
+            min_y = min_y.min(y);
+            max_y = max_y.max(y);
+            
+            // Find nearby edge points
+            for &(nx, ny) in edges {
+                if !visited.contains(&(nx, ny)) {
+                    let dx = (x as i32 - nx as i32).abs();
+                    let dy = (y as i32 - ny as i32).abs();
+                    
+                    if dx <= 3 && dy <= 3 {
+                        stack.push((nx, ny));
+                    }
+                }
+            }
+        }
+        
+        // Check if component forms a reasonable rectangle
+        if component_size > 20 {
+            Some(ElementBounds {
+                x: min_x as i32,
+                y: min_y as i32,
+                width: (max_x - min_x) as i32,
+                height: (max_y - min_y) as i32,
+            })
         } else {
             None
         }
     }
-    
-    fn calculate_match_score(&self, element: &ScreenElement, command: &str) -> f32 {
-        let mut score = 0.0;
+
+    /// Classify a rectangle as a UI element type
+    fn classify_element(&self, rect: &ElementBounds, image: &RgbImage) -> Option<ElementDetection> {
+        let aspect_ratio = rect.width as f32 / rect.height as f32;
+        let area = rect.width * rect.height;
+        let brightness = self.calculate_average_brightness(image, rect);
         
-        // Check element type match
-        if command.contains(&element.element_type) {
-            score += 0.3;
-        }
-        
-        // Check text content match
-        if let Some(text) = &element.text {
-            let text_lower = text.to_lowercase();
-            let words: Vec<&str> = command.split_whitespace().collect();
-            
-            for word in words {
-                if text_lower.contains(word) {
-                    score += 0.4 / words.len() as f32;
+        // Try to match against classification rules
+        for (element_type, rule) in &self.classification_rules {
+            if aspect_ratio >= rule.aspect_ratio_min && 
+               aspect_ratio <= rule.aspect_ratio_max &&
+               area >= rule.area_min && 
+               area <= rule.area_max {
+                
+                // Check brightness threshold if specified
+                if let Some(brightness_threshold) = rule.brightness_threshold {
+                    if brightness < brightness_threshold {
+                        continue;
+                    }
                 }
+                
+                let confidence = self.calculate_confidence(rect, element_type, aspect_ratio, area);
+                
+                return Some(ElementDetection {
+                    element_type: element_type.clone(),
+                    bounds: rect.clone(),
+                    confidence,
+                    text: None, // TODO: Implement simple OCR
+                    attributes: self.extract_attributes(rect, element_type),
+                });
             }
         }
         
-        // Boost score for buttons and links
-        if element.element_type == "button" || element.element_type == "link" {
-            score += 0.1;
+        // Default classification
+        if area > 500 {
+            Some(ElementDetection {
+                element_type: "element".to_string(),
+                bounds: rect.clone(),
+                confidence: 0.3,
+                text: None,
+                attributes: HashMap::new(),
+            })
+        } else {
+            None
         }
-        
-        // Factor in AI confidence
-        score *= element.confidence;
-        
-        score
     }
-    
-    fn parse_key_combination(&self, command: &str) -> Vec<String> {
-        let mut keys = Vec::new();
+
+    /// Calculate average brightness of a rectangular region
+    fn calculate_average_brightness(&self, image: &RgbImage, rect: &ElementBounds) -> f32 {
+        let mut total_brightness = 0.0;
+        let mut pixel_count = 0;
         
-        if command.contains("ctrl") {
-            keys.push("ctrl".to_string());
-        }
-        if command.contains("alt") {
-            keys.push("alt".to_string());
-        }
-        if command.contains("shift") {
-            keys.push("shift".to_string());
-        }
+        let end_x = ((rect.x + rect.width) as u32).min(image.width());
+        let end_y = ((rect.y + rect.height) as u32).min(image.height());
         
-        // Extract the main key
-        if command.contains("ctrl+c") || command.contains("copy") {
-            keys.push("c".to_string());
-        } else if command.contains("ctrl+v") || command.contains("paste") {
-            keys.push("v".to_string());
-        } else if command.contains("ctrl+s") || command.contains("save") {
-            keys.push("s".to_string());
-        }
-        
-        keys
-    }
-    
-    fn is_clickable(&self, element_type: &str) -> bool {
-        matches!(element_type, "button" | "link" | "checkbox" | "radio" | "tab" | "menu" | "icon")
-    }
-    
-    fn deduplicate_elements(&self, mut elements: Vec<ScreenElement>) -> Vec<ScreenElement> {
-        // Simple deduplication based on position and type
-        elements.sort_by(|a, b| {
-            a.bounds.x.cmp(&b.bounds.x)
-                .then(a.bounds.y.cmp(&b.bounds.y))
-                .then(a.element_type.cmp(&b.element_type))
-        });
-        
-        let mut deduplicated = Vec::new();
-        let mut last_element: Option<&ScreenElement> = None;
-        
-        for element in &elements {
-            let should_keep = match last_element {
-                None => true,
-                Some(last) => {
-                    // Keep if significantly different position or type
-                    (element.bounds.x - last.bounds.x).abs() > 10 ||
-                    (element.bounds.y - last.bounds.y).abs() > 10 ||
-                    element.element_type != last.element_type
-                }
-            };
-            
-            if should_keep {
-                deduplicated.push(element.clone());
-                last_element = Some(element);
+        for y in (rect.y as u32)..end_y {
+            for x in (rect.x as u32)..end_x {
+                let pixel = image.get_pixel(x, y);
+                let brightness = 0.299 * pixel[0] as f32 + 0.587 * pixel[1] as f32 + 0.114 * pixel[2] as f32;
+                total_brightness += brightness;
+                pixel_count += 1;
             }
         }
         
-        deduplicated
+        if pixel_count > 0 {
+            total_brightness / pixel_count as f32
+        } else {
+            0.0
+        }
     }
-    
-    fn calculate_image_hash(&self, image: &DynamicImage) -> String {
-        // Simple hash based on image dimensions and a few pixel samples
-        let width = image.width();
-        let height = image.height();
+
+    /// Calculate confidence for element classification
+    fn calculate_confidence(&self, rect: &ElementBounds, element_type: &str, aspect_ratio: f32, area: i32) -> f32 {
+        let mut confidence = 0.5;
         
-        format!("{}x{}", width, height) // Simplified hash
+        // Boost confidence based on element type characteristics
+        match element_type {
+            "button" => {
+                if (1.5..=5.0).contains(&aspect_ratio) && (800..=8000).contains(&area) {
+                    confidence += 0.3;
+                }
+            }
+            "textfield" => {
+                if aspect_ratio > 3.0 && (1500..=15000).contains(&area) {
+                    confidence += 0.3;
+                }
+            }
+            "icon" => {
+                if (0.8..=1.2).contains(&aspect_ratio) && area < 2000 {
+                    confidence += 0.4;
+                }
+            }
+            _ => confidence -= 0.1,
+        }
+        
+        // Penalize extreme sizes
+        if area < 100 || area > 50000 {
+            confidence -= 0.2;
+        }
+        
+        confidence.clamp(0.0, 1.0)
+    }
+
+    /// Extract element attributes
+    fn extract_attributes(&self, rect: &ElementBounds, element_type: &str) -> HashMap<String, String> {
+        let mut attributes = HashMap::new();
+        
+        attributes.insert("area".to_string(), (rect.width * rect.height).to_string());
+        attributes.insert("aspect_ratio".to_string(), (rect.width as f32 / rect.height as f32).to_string());
+        
+        match element_type {
+            "button" => {
+                attributes.insert("clickable".to_string(), "true".to_string());
+            }
+            "textfield" => {
+                attributes.insert("editable".to_string(), "true".to_string());
+            }
+            "icon" => {
+                attributes.insert("clickable".to_string(), "true".to_string());
+            }
+            _ => {}
+        }
+        
+        attributes
     }
 }
 
-/// Get available AI models info
-pub fn get_model_info() -> Vec<ModelInfo> {
-    vec![
-        ModelInfo {
-            name: "CLIP".to_string(),
-            description: "General computer vision and image understanding".to_string(),
-            size_mb: 150,
-            capabilities: vec!["object_detection".to_string(), "scene_understanding".to_string()],
-        },
-        ModelInfo {
-            name: "Florence-2".to_string(),
-            description: "Advanced scene analysis and element detection".to_string(),
-            size_mb: 280,
-            capabilities: vec!["detailed_analysis".to_string(), "element_detection".to_string()],
-        },
-        ModelInfo {
-            name: "TrOCR".to_string(),
-            description: "Optical character recognition for text extraction".to_string(),
-            size_mb: 120,
-            capabilities: vec!["text_recognition".to_string(), "ocr".to_string()],
-        },
-    ]
+impl Default for AICoordinator {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
-#[derive(Debug, Clone)]
-pub struct ModelInfo {
-    pub name: String,
-    pub description: String,
-    pub size_mb: u64,
-    pub capabilities: Vec<String>,
+impl Default for VisionProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
 }
+
+// Re-export for backward compatibility
+pub use AICoordinator as AIVisionPipeline;

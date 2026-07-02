@@ -1,309 +1,245 @@
-/*!
- * Luna Logging System - Structured logging for the portable app
- */
+// Simple logging implementation without external logging crates
+// Replaces complex logging frameworks with standard library
 
-use anyhow::Result;
-use std::path::PathBuf;
-use tracing::{Level, info};
-use tracing_subscriber::{
-    fmt::{self, time::ChronoUtc},
-    layer::SubscriberExt,
-    util::SubscriberInitExt,
-    EnvFilter, Layer,
-};
+use std::fs::{File, OpenOptions};
+use std::io::{self, Write};
+use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 
-/// Setup logging system for Luna
-pub fn setup_logging() -> Result<()> {
-    setup_logging_with_config(&LoggingConfig::default())
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
+pub enum LogLevel {
+    Error = 0,
+    Warn = 1,
+    Info = 2,
+    Debug = 3,
+    Trace = 4,
 }
 
-/// Setup logging with custom configuration
-pub fn setup_logging_with_config(config: &LoggingConfig) -> Result<()> {
-    // Create log directory if it doesn't exist
-    if let Some(log_dir) = config.log_file.parent() {
-        std::fs::create_dir_all(log_dir)?;
+impl std::fmt::Display for LogLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LogLevel::Error => write!(f, "ERROR"),
+            LogLevel::Warn => write!(f, "WARN "),
+            LogLevel::Info => write!(f, "INFO "),
+            LogLevel::Debug => write!(f, "DEBUG"),
+            LogLevel::Trace => write!(f, "TRACE"),
+        }
     }
-    
-    // Environment filter for log levels
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| {
-            match config.level {
-                LogLevel::Trace => "luna=trace",
-                LogLevel::Debug => "luna=debug", 
-                LogLevel::Info => "luna=info",
-                LogLevel::Warn => "luna=warn",
-                LogLevel::Error => "luna=error",
-            }.into()
-        });
-    
-    // Console layer
-    let console_layer = fmt::layer()
-        .with_ansi(config.use_colors)
-        .with_timer(ChronoUtc::rfc3339())
-        .with_target(config.show_targets)
-        .with_thread_ids(config.show_thread_ids)
-        .with_thread_names(config.show_thread_names)
-        .with_filter(env_filter.clone());
-    
-    // File layer (if log file is specified)
-    let file_layer = if config.log_to_file {
-        let file_appender = tracing_appender::rolling::daily(
-            config.log_file.parent().unwrap_or(&PathBuf::from(".")),
-            config.log_file.file_name().unwrap_or(std::ffi::OsStr::new("luna.log"))
-        );
-        
-        Some(fmt::layer()
-            .with_writer(file_appender)
-            .with_ansi(false) // No colors in file
-            .with_timer(ChronoUtc::rfc3339())
-            .with_target(true)
-            .with_thread_ids(true)
-            .with_filter(env_filter))
-    } else {
-        None
-    };
-    
-    // Initialize subscriber
-    let subscriber = tracing_subscriber::registry()
-        .with(console_layer);
-    
-    if let Some(file_layer) = file_layer {
-        subscriber.with(file_layer).init();
-    } else {
-        subscriber.init();
-    }
-    
-    info!("Luna logging system initialized");
-    info!("Log level: {:?}", config.level);
-    if config.log_to_file {
-        info!("Logging to file: {:?}", config.log_file);
-    }
-    
-    Ok(())
 }
 
-/// Logging configuration
-#[derive(Debug, Clone)]
-pub struct LoggingConfig {
-    pub level: LogLevel,
-    pub log_to_file: bool,
-    pub log_file: PathBuf,
-    pub use_colors: bool,
-    pub show_targets: bool,
-    pub show_thread_ids: bool,
-    pub show_thread_names: bool,
-    pub max_file_size_mb: u64,
-    pub max_files: usize,
+pub struct Logger {
+    level: LogLevel,
+    file: Option<Arc<Mutex<File>>>,
+    console: bool,
 }
 
-impl Default for LoggingConfig {
-    fn default() -> Self {
+impl Logger {
+    pub fn new() -> Self {
         Self {
             level: LogLevel::Info,
-            log_to_file: true,
-            log_file: get_default_log_path(),
-            use_colors: true,
-            show_targets: false,
-            show_thread_ids: false,
-            show_thread_names: false,
-            max_file_size_mb: 10,
-            max_files: 5,
+            file: None,
+            console: true,
         }
+    }
+
+    pub fn with_level(mut self, level: LogLevel) -> Self {
+        self.level = level;
+        self
+    }
+
+    pub fn with_file(mut self, path: &str) -> Result<Self, io::Error> {
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)?;
+        self.file = Some(Arc::new(Mutex::new(file)));
+        Ok(self)
+    }
+
+    pub fn with_console(mut self, enabled: bool) -> Self {
+        self.console = enabled;
+        self
+    }
+
+    pub fn log(&self, level: LogLevel, message: &str) {
+        if level <= self.level {
+            let timestamp = format_timestamp();
+            let log_line = format!("{} [{}] {}\n", timestamp, level, message);
+
+            if self.console {
+                print!("{}", log_line);
+                let _ = io::stdout().flush();
+            }
+
+            if let Some(ref file) = self.file {
+                if let Ok(mut f) = file.lock() {
+                    let _ = f.write_all(log_line.as_bytes());
+                    let _ = f.flush();
+                }
+            }
+        }
+    }
+
+    pub fn error(&self, message: &str) {
+        self.log(LogLevel::Error, message);
+    }
+
+    pub fn warn(&self, message: &str) {
+        self.log(LogLevel::Warn, message);
+    }
+
+    pub fn info(&self, message: &str) {
+        self.log(LogLevel::Info, message);
+    }
+
+    pub fn debug(&self, message: &str) {
+        self.log(LogLevel::Debug, message);
+    }
+
+    pub fn trace(&self, message: &str) {
+        self.log(LogLevel::Trace, message);
     }
 }
 
-/// Log levels
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LogLevel {
-    Trace,
-    Debug,
-    Info,
-    Warn,
-    Error,
-}
-
-impl From<LogLevel> for Level {
-    fn from(level: LogLevel) -> Self {
-        match level {
-            LogLevel::Trace => Level::TRACE,
-            LogLevel::Debug => Level::DEBUG,
-            LogLevel::Info => Level::INFO,
-            LogLevel::Warn => Level::WARN,
-            LogLevel::Error => Level::ERROR,
-        }
+impl Default for Logger {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
-/// Get default log file path
-fn get_default_log_path() -> PathBuf {
-    // For portable app, place logs next to executable
-    let exe_dir = std::env::current_exe()
-        .map(|p| p.parent().unwrap_or(&std::path::Path::new(".")).to_path_buf())
-        .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    
-    exe_dir.join("logs").join("luna.log")
+fn format_timestamp() -> String {
+    match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
+        Ok(duration) => {
+            let secs = duration.as_secs();
+            let millis = duration.subsec_millis();
+            
+            // Simple timestamp formatting (YYYY-MM-DD HH:MM:SS.mmm)
+            let days_since_epoch = secs / 86400;
+            let days_since_1970 = days_since_epoch;
+            
+            // Approximate date calculation (not leap year aware, but close enough for logging)
+            let year = 1970 + days_since_1970 / 365;
+            let day_of_year = days_since_1970 % 365;
+            let month = (day_of_year / 30) + 1;
+            let day = (day_of_year % 30) + 1;
+            
+            let time_of_day = secs % 86400;
+            let hour = time_of_day / 3600;
+            let minute = (time_of_day % 3600) / 60;
+            let second = time_of_day % 60;
+            
+            format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:03}", 
+                    year, month, day, hour, minute, second, millis)
+        }
+        Err(_) => "1970-01-01 00:00:00.000".to_string(),
+    }
 }
 
-/// Create a structured log entry
+// Global logger instance
+static mut GLOBAL_LOGGER: Option<Logger> = None;
+static LOGGER_INIT: std::sync::Once = std::sync::Once::new();
+
+pub fn init_logger(logger: Logger) {
+    LOGGER_INIT.call_once(|| {
+        unsafe {
+            GLOBAL_LOGGER = Some(logger);
+        }
+    });
+}
+
+pub fn get_logger() -> Option<&'static Logger> {
+    unsafe { GLOBAL_LOGGER.as_ref() }
+}
+
+// Convenience macros for global logging
 #[macro_export]
-macro_rules! log_action {
-    ($level:expr, $action:expr, $($field:ident = $value:expr),*) => {
-        tracing::event!(
-            $level,
-            action = $action,
-            $($field = $value,)*
-        );
+macro_rules! log_error {
+    ($($arg:tt)*) => {
+        if let Some(logger) = $crate::utils::logging::get_logger() {
+            logger.error(&format!($($arg)*));
+        }
     };
 }
 
-/// Log command execution
-pub fn log_command_start(command: &str) {
-    info!(
-        command = command,
-        event = "command_start",
-        "Starting command execution"
-    );
-}
-
-pub fn log_command_success(command: &str, duration_ms: u64) {
-    info!(
-        command = command,
-        duration_ms = duration_ms,
-        event = "command_success",
-        "Command completed successfully"
-    );
-}
-
-pub fn log_command_error(command: &str, error: &str, duration_ms: u64) {
-    tracing::error!(
-        command = command,
-        error = error,
-        duration_ms = duration_ms,
-        event = "command_error",
-        "Command failed"
-    );
-}
-
-/// Log AI processing
-pub fn log_ai_processing(model: &str, operation: &str, processing_time_ms: u64, success: bool) {
-    if success {
-        info!(
-            model = model,
-            operation = operation,
-            processing_time_ms = processing_time_ms,
-            event = "ai_processing_success",
-            "AI processing completed"
-        );
-    } else {
-        tracing::warn!(
-            model = model,
-            operation = operation,
-            processing_time_ms = processing_time_ms,
-            event = "ai_processing_failed",
-            "AI processing failed"
-        );
-    }
-}
-
-/// Log safety events
-pub fn log_safety_block(command: &str, reason: &str) {
-    tracing::warn!(
-        command = command,
-        reason = reason,
-        event = "safety_block",
-        "Command blocked by safety system"
-    );
-}
-
-/// Log performance metrics
-pub fn log_performance_warning(metric: &str, value: f64, threshold: f64) {
-    tracing::warn!(
-        metric = metric,
-        value = value,
-        threshold = threshold,
-        event = "performance_warning",
-        "Performance metric exceeded threshold"
-    );
-}
-
-/// Log system events
-pub fn log_system_event(event_type: &str, details: &str) {
-    info!(
-        event_type = event_type,
-        details = details,
-        event = "system_event",
-        "System event occurred"
-    );
-}
-
-/// Create a log context for operations
-pub struct LogContext {
-    operation: String,
-    start_time: std::time::Instant,
-    fields: std::collections::HashMap<String, String>,
-}
-
-impl LogContext {
-    pub fn new(operation: &str) -> Self {
-        Self {
-            operation: operation.to_string(),
-            start_time: std::time::Instant::now(),
-            fields: std::collections::HashMap::new(),
+#[macro_export]
+macro_rules! log_warn {
+    ($($arg:tt)*) => {
+        if let Some(logger) = $crate::utils::logging::get_logger() {
+            logger.warn(&format!($($arg)*));
         }
-    }
-    
-    pub fn add_field<V: ToString>(&mut self, key: &str, value: V) {
-        self.fields.insert(key.to_string(), value.to_string());
-    }
-    
-    pub fn success(self) {
-        let duration_ms = self.start_time.elapsed().as_millis() as u64;
+    };
+}
+
+#[macro_export]
+macro_rules! log_info {
+    ($($arg:tt)*) => {
+        if let Some(logger) = $crate::utils::logging::get_logger() {
+            logger.info(&format!($($arg)*));
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! log_debug {
+    ($($arg:tt)*) => {
+        if let Some(logger) = $crate::utils::logging::get_logger() {
+            logger.debug(&format!($($arg)*));
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! log_trace {
+    ($($arg:tt)*) => {
+        if let Some(logger) = $crate::utils::logging::get_logger() {
+            logger.trace(&format!($($arg)*));
+        }
+    };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn test_logger_levels() {
+        let logger = Logger::new().with_level(LogLevel::Warn);
         
-        let mut event = tracing::info_span!("operation_complete");
-        event.record("operation", &self.operation);
-        event.record("duration_ms", &duration_ms);
-        event.record("success", &true);
+        // These should not output anything since we're only logging WARN and above
+        logger.debug("This should not appear");
+        logger.trace("This should not appear");
         
-        for (key, value) in &self.fields {
-            event.record(key, value);
+        // These should output
+        logger.warn("This should appear");
+        logger.error("This should appear");
+    }
+
+    #[test]
+    fn test_file_logging() {
+        let temp_file = std::env::temp_dir().join("test_log.txt");
+        
+        {
+            let logger = Logger::new()
+                .with_file(temp_file.to_str().unwrap())
+                .unwrap()
+                .with_console(false);
+            
+            logger.info("Test message");
         }
         
-        tracing::info!(parent: &event, "Operation completed successfully");
+        let content = fs::read_to_string(&temp_file).unwrap();
+        assert!(content.contains("Test message"));
+        
+        // Clean up
+        let _ = fs::remove_file(&temp_file);
     }
-    
-    pub fn error(self, error: &str) {
-        let duration_ms = self.start_time.elapsed().as_millis() as u64;
-        
-        let mut event = tracing::error_span!("operation_failed");
-        event.record("operation", &self.operation);
-        event.record("duration_ms", &duration_ms);
-        event.record("success", &false);
-        event.record("error", &error);
-        
-        for (key, value) in &self.fields {
-            event.record(key, value);
-        }
-        
-        tracing::error!(parent: &event, "Operation failed: {}", error);
-    }
-}
 
-/// Get current log level
-pub fn get_log_level() -> LogLevel {
-    // Check environment variable or use default
-    match std::env::var("LUNA_LOG_LEVEL").as_deref() {
-        Ok("trace") => LogLevel::Trace,
-        Ok("debug") => LogLevel::Debug,
-        Ok("info") => LogLevel::Info,
-        Ok("warn") => LogLevel::Warn,
-        Ok("error") => LogLevel::Error,
-        _ => LogLevel::Info,
+    #[test]
+    fn test_log_level_ordering() {
+        assert!(LogLevel::Error < LogLevel::Warn);
+        assert!(LogLevel::Warn < LogLevel::Info);
+        assert!(LogLevel::Info < LogLevel::Debug);
+        assert!(LogLevel::Debug < LogLevel::Trace);
     }
-}
-
-/// Flush logs (ensure all logs are written)
-pub fn flush_logs() {
-    // In real implementation, would flush all appenders
-    std::io::Write::flush(&mut std::io::stdout()).ok();
-    std::io::Write::flush(&mut std::io::stderr()).ok();
 }

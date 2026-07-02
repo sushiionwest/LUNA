@@ -1,137 +1,234 @@
 /*!
- * Luna Configuration - Simple embedded configuration
+ * Luna Configuration - Simplified configuration with minimal dependencies
  */
 
-use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-/// Luna configuration - embedded defaults
+/// Luna configuration structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LunaConfig {
-    /// AI model settings
-    pub ai: AiConfig,
-    /// Safety settings
+    /// Safety system settings
     pub safety: SafetyConfig,
-    /// UI settings
-    pub ui: UiConfig,
-    /// Performance settings
-    pub performance: PerformanceConfig,
+    /// Vision processing settings
+    pub vision: VisionConfig,
+    /// Input system settings
+    pub input: InputConfig,
+    /// Logging settings
+    pub logging: LoggingConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AiConfig {
-    /// Model precision (f16, f32)
-    pub precision: String,
-    /// Use GPU acceleration if available
-    pub use_gpu: bool,
-    /// Maximum inference time in milliseconds
-    pub max_inference_time_ms: u64,
-    /// Confidence threshold for actions
-    pub confidence_threshold: f32,
-}
-
+/// Safety system configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SafetyConfig {
-    /// Enable safety checks
+    /// Enable safety system
     pub enabled: bool,
-    /// Confirmation timeout in seconds
-    pub confirmation_timeout_seconds: u64,
-    /// Blocked keywords that prevent execution
-    pub blocked_keywords: Vec<String>,
+    /// Confidence threshold for dangerous patterns
+    pub threat_threshold: f32,
     /// Maximum actions per command
     pub max_actions_per_command: usize,
+    /// Action delay in milliseconds
+    pub action_delay_ms: u64,
+    /// Blocked applications
+    pub blocked_apps: Vec<String>,
 }
 
+/// Vision processing configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UiConfig {
-    /// Show visual overlay
-    pub show_overlay: bool,
-    /// Overlay transparency (0.0 to 1.0)
-    pub overlay_opacity: f32,
-    /// Highlight color (RGB)
-    pub highlight_color: [u8; 3],
-    /// Enable sound effects
-    pub enable_sounds: bool,
+pub struct VisionConfig {
+    /// Confidence threshold for element detection
+    pub confidence_threshold: f32,
+    /// Maximum elements to detect
+    pub max_elements: usize,
+    /// Edge detection sensitivity
+    pub edge_threshold: f32,
+    /// Minimum element size
+    pub min_element_size: u32,
+    /// Screenshot quality (0-100)
+    pub screenshot_quality: u8,
 }
 
+/// Input system configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PerformanceConfig {
-    /// Maximum memory usage in MB
-    pub max_memory_mb: u64,
-    /// Number of worker threads
-    pub worker_threads: usize,
-    /// Screenshot cache size
-    pub screenshot_cache_size: usize,
+pub struct InputConfig {
+    /// Click delay in milliseconds
+    pub click_delay_ms: u64,
+    /// Type delay between characters in milliseconds
+    pub type_delay_ms: u64,
+    /// Scroll amount per action
+    pub scroll_amount: i32,
+    /// Enable input validation
+    pub validate_coordinates: bool,
+}
+
+/// Logging configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoggingConfig {
+    /// Log level (error, warn, info, debug, trace)
+    pub level: String,
+    /// Enable file logging
+    pub log_to_file: bool,
+    /// Log directory
+    pub log_dir: Option<PathBuf>,
+    /// Maximum log file size in MB
+    pub max_file_size_mb: u64,
+    /// Maximum number of log files to keep
+    pub max_files: u32,
 }
 
 impl Default for LunaConfig {
     fn default() -> Self {
         Self {
-            ai: AiConfig {
-                precision: "f32".to_string(),
-                use_gpu: false, // CPU-only for maximum compatibility
-                max_inference_time_ms: 5000,
-                confidence_threshold: 0.7,
-            },
-            safety: SafetyConfig {
-                enabled: true,
-                confirmation_timeout_seconds: 3,
-                blocked_keywords: vec![
-                    "delete".to_string(),
-                    "format".to_string(),
-                    "shutdown".to_string(),
-                    "restart".to_string(),
-                    "registry".to_string(),
-                    "system32".to_string(),
-                ],
-                max_actions_per_command: 10,
-            },
-            ui: UiConfig {
-                show_overlay: true,
-                overlay_opacity: 0.8,
-                highlight_color: [100, 149, 237], // Cornflower blue
-                enable_sounds: true,
-            },
-            performance: PerformanceConfig {
-                max_memory_mb: 512,
-                worker_threads: 2,
-                screenshot_cache_size: 5,
-            },
+            safety: SafetyConfig::default(),
+            vision: VisionConfig::default(),
+            input: InputConfig::default(),
+            logging: LoggingConfig::default(),
+        }
+    }
+}
+
+impl Default for SafetyConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            threat_threshold: 0.7,
+            max_actions_per_command: 10,
+            action_delay_ms: 50,
+            blocked_apps: vec![
+                "cmd.exe".to_string(),
+                "powershell.exe".to_string(),
+                "regedit.exe".to_string(),
+            ],
+        }
+    }
+}
+
+impl Default for VisionConfig {
+    fn default() -> Self {
+        Self {
+            confidence_threshold: 0.6,
+            max_elements: 50,
+            edge_threshold: 30.0,
+            min_element_size: 20,
+            screenshot_quality: 85,
+        }
+    }
+}
+
+impl Default for InputConfig {
+    fn default() -> Self {
+        Self {
+            click_delay_ms: 50,
+            type_delay_ms: 10,
+            scroll_amount: 3,
+            validate_coordinates: true,
+        }
+    }
+}
+
+impl Default for LoggingConfig {
+    fn default() -> Self {
+        Self {
+            level: "info".to_string(),
+            log_to_file: false,
+            log_dir: None,
+            max_file_size_mb: 10,
+            max_files: 5,
         }
     }
 }
 
 impl LunaConfig {
-    /// Load configuration (embedded defaults for portable executable)
-    pub fn load() -> Result<Self> {
-        // For portable executable, we use embedded defaults
-        // No external config files needed
-        Ok(Self::default())
+    /// Load configuration from file
+    pub fn from_file(path: &std::path::Path) -> anyhow::Result<Self> {
+        let content = std::fs::read_to_string(path)?;
+        let config: LunaConfig = serde_json::from_str(&content)?;
+        Ok(config)
     }
-    
-    /// Get data directory (portable mode uses current directory)
-    pub fn data_dir() -> PathBuf {
-        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+
+    /// Save configuration to file
+    pub fn save_to_file(&self, path: &std::path::Path) -> anyhow::Result<()> {
+        let content = serde_json::to_string_pretty(self)?;
+        std::fs::write(path, content)?;
+        Ok(())
     }
-    
-    /// Get temporary directory for Luna
-    pub fn temp_dir() -> PathBuf {
-        std::env::temp_dir().join("luna")
+
+    /// Get default configuration file path
+    pub fn default_config_path() -> anyhow::Result<PathBuf> {
+        let mut path = if let Some(config_dir) = dirs::config_dir() {
+            config_dir
+        } else {
+            std::env::current_dir()?
+        };
+        
+        path.push("luna");
+        std::fs::create_dir_all(&path)?;
+        path.push("config.json");
+        
+        Ok(path)
     }
-    
-    /// Validate configuration
-    pub fn validate(&self) -> Result<()> {
-        if self.performance.max_memory_mb < 128 {
-            return Err(anyhow::anyhow!("Minimum memory requirement is 128MB"));
+
+    /// Load configuration from default location or create default
+    pub fn load_or_default() -> Self {
+        if let Ok(config_path) = Self::default_config_path() {
+            if config_path.exists() {
+                if let Ok(config) = Self::from_file(&config_path) {
+                    return config;
+                }
+            }
         }
         
-        if self.performance.worker_threads == 0 {
-            return Err(anyhow::anyhow!("Must have at least 1 worker thread"));
+        // Return default configuration if loading fails
+        Self::default()
+    }
+
+    /// Save current configuration to default location
+    pub fn save_to_default_location(&self) -> anyhow::Result<()> {
+        let config_path = Self::default_config_path()?;
+        self.save_to_file(&config_path)
+    }
+
+    /// Validate configuration values
+    pub fn validate(&self) -> anyhow::Result<()> {
+        // Validate safety config
+        if self.safety.threat_threshold < 0.0 || self.safety.threat_threshold > 1.0 {
+            return Err(anyhow::anyhow!("Safety threat threshold must be between 0.0 and 1.0"));
         }
-        
-        if self.ai.confidence_threshold < 0.1 || self.ai.confidence_threshold > 1.0 {
-            return Err(anyhow::anyhow!("Confidence threshold must be between 0.1 and 1.0"));
+
+        if self.safety.max_actions_per_command == 0 {
+            return Err(anyhow::anyhow!("Max actions per command must be greater than 0"));
+        }
+
+        // Validate vision config
+        if self.vision.confidence_threshold < 0.0 || self.vision.confidence_threshold > 1.0 {
+            return Err(anyhow::anyhow!("Vision confidence threshold must be between 0.0 and 1.0"));
+        }
+
+        if self.vision.max_elements == 0 {
+            return Err(anyhow::anyhow!("Max elements must be greater than 0"));
+        }
+
+        if self.vision.screenshot_quality > 100 {
+            return Err(anyhow::anyhow!("Screenshot quality must be between 0 and 100"));
+        }
+
+        // Validate logging config
+        let valid_levels = ["error", "warn", "info", "debug", "trace"];
+        if !valid_levels.contains(&self.logging.level.as_str()) {
+            return Err(anyhow::anyhow!("Invalid log level: {}", self.logging.level));
+        }
+
+        Ok(())
+    }
+
+    /// Apply configuration to logger
+    pub fn apply_logging(&self) -> anyhow::Result<()> {
+        // Set up env_logger if logging feature is enabled
+        #[cfg(feature = "logging")]
+        {
+            use std::env;
+            env::set_var("RUST_LOG", &self.logging.level);
+            env_logger::init();
         }
         
         Ok(())

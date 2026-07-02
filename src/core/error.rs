@@ -1,173 +1,185 @@
 /*!
- * Luna Error Types - Comprehensive error handling
+ * Luna Error Types - Simplified error handling without heavy dependencies
  */
 
-use thiserror::Error;
+use std::fmt;
 
 /// Luna-specific error types
-#[derive(Error, Debug)]
+#[derive(Debug)]
 pub enum LunaError {
-    #[error("AI model not found: {0}")]
-    ModelNotFound(String),
-    
-    #[error("AI inference failed: {0}")]
-    InferenceFailed(String),
-    
-    #[error("Screen capture failed: {0}")]
-    ScreenCaptureFailed(String),
-    
-    #[error("Unsafe command blocked: {0}")]
+    /// Configuration error
+    Config(String),
+    /// Safety system blocked operation
     UnsafeCommand(String),
-    
-    #[error("Input system error: {0}")]
-    InputSystemError(String),
-    
-    #[error("Overlay error: {0}")]
-    OverlayError(String),
-    
-    #[error("Configuration error: {0}")]
-    ConfigError(String),
-    
-    #[error("Memory error: {0}")]
-    MemoryError(String),
-    
-    #[error("Timeout error: operation took too long")]
-    TimeoutError,
-    
-    #[error("No elements found matching: {0}")]
-    NoElementsFound(String),
-    
-    #[error("Multiple elements found, ambiguous: {0}")]
-    AmbiguousElements(String),
-    
-    #[error("Command cancelled by user")]
-    UserCancelled,
-    
-    #[error("System not ready: {0}")]
-    SystemNotReady(String),
-    
-    #[error("Windows API error: {0}")]
-    WindowsApiError(String),
-    
-    #[error("IO error: {0}")]
-    IoError(#[from] std::io::Error),
-    
-    #[error("Serialization error: {0}")]
-    SerializationError(#[from] serde_json::Error),
-    
-    #[error("Image processing error: {0}")]
-    ImageError(#[from] image::ImageError),
-    
-    #[error("Generic error: {0}")]
-    Generic(String),
+    /// Safety system blocked action
+    UnsafeAction(String),
+    /// Vision processing error
+    Vision(String),
+    /// Input system error
+    Input(String),
+    /// Screen capture error
+    ScreenCapture(String),
+    /// AI processing error
+    AI(String),
+    /// System error
+    System(String),
+    /// Invalid argument
+    InvalidArgument(String),
+    /// Operation timeout
+    Timeout(String),
+    /// Resource not found
+    NotFound(String),
+    /// Permission denied
+    PermissionDenied(String),
 }
 
-impl LunaError {
-    /// Check if error is recoverable
-    pub fn is_recoverable(&self) -> bool {
+impl fmt::Display for LunaError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            LunaError::TimeoutError => true,
-            LunaError::UserCancelled => true,
-            LunaError::NoElementsFound(_) => true,
-            LunaError::AmbiguousElements(_) => true,
-            LunaError::SystemNotReady(_) => true,
-            _ => false,
-        }
-    }
-    
-    /// Get user-friendly error message
-    pub fn user_message(&self) -> String {
-        match self {
-            LunaError::ModelNotFound(_) => "AI model not available. Please check your installation.".to_string(),
-            LunaError::InferenceFailed(_) => "AI processing failed. Please try again.".to_string(),
-            LunaError::ScreenCaptureFailed(_) => "Could not capture screen. Please check permissions.".to_string(),
-            LunaError::UnsafeCommand(cmd) => format!("Command '{}' is blocked for safety reasons.", cmd),
-            LunaError::InputSystemError(_) => "Input system error. Please try again.".to_string(),
-            LunaError::OverlayError(_) => "Display overlay error. Please try again.".to_string(),
-            LunaError::ConfigError(_) => "Configuration error. Please check your settings.".to_string(),
-            LunaError::MemoryError(_) => "Memory error. Please restart Luna.".to_string(),
-            LunaError::TimeoutError => "Operation timed out. Please try again.".to_string(),
-            LunaError::NoElementsFound(what) => format!("Could not find '{}'on screen. Please make sure it's visible.", what),
-            LunaError::AmbiguousElements(what) => format!("Found multiple '{}' elements. Please be more specific.", what),
-            LunaError::UserCancelled => "Command cancelled by user.".to_string(),
-            LunaError::SystemNotReady(_) => "Luna is still starting up. Please wait a moment.".to_string(),
-            LunaError::WindowsApiError(_) => "Windows system error. Please try again.".to_string(),
-            LunaError::IoError(_) => "File system error. Please check permissions.".to_string(),
-            LunaError::SerializationError(_) => "Data processing error. Please try again.".to_string(),
-            LunaError::ImageError(_) => "Image processing error. Please try again.".to_string(),
-            LunaError::Generic(msg) => msg.clone(),
-        }
-    }
-    
-    /// Get error severity level
-    pub fn severity(&self) -> ErrorSeverity {
-        match self {
-            LunaError::ModelNotFound(_) => ErrorSeverity::Critical,
-            LunaError::ConfigError(_) => ErrorSeverity::Critical,
-            LunaError::MemoryError(_) => ErrorSeverity::Critical,
-            LunaError::UnsafeCommand(_) => ErrorSeverity::High,
-            LunaError::WindowsApiError(_) => ErrorSeverity::High,
-            LunaError::InferenceFailed(_) => ErrorSeverity::Medium,
-            LunaError::ScreenCaptureFailed(_) => ErrorSeverity::Medium,
-            LunaError::InputSystemError(_) => ErrorSeverity::Medium,
-            LunaError::OverlayError(_) => ErrorSeverity::Low,
-            LunaError::TimeoutError => ErrorSeverity::Low,
-            LunaError::NoElementsFound(_) => ErrorSeverity::Low,
-            LunaError::AmbiguousElements(_) => ErrorSeverity::Low,
-            LunaError::UserCancelled => ErrorSeverity::Info,
-            LunaError::SystemNotReady(_) => ErrorSeverity::Info,
-            LunaError::IoError(_) => ErrorSeverity::Medium,
-            LunaError::SerializationError(_) => ErrorSeverity::Medium,
-            LunaError::ImageError(_) => ErrorSeverity::Medium,
-            LunaError::Generic(_) => ErrorSeverity::Medium,
+            LunaError::Config(msg) => write!(f, "Configuration error: {}", msg),
+            LunaError::UnsafeCommand(cmd) => write!(f, "Unsafe command blocked: {}", cmd),
+            LunaError::UnsafeAction(action) => write!(f, "Unsafe action blocked: {}", action),
+            LunaError::Vision(msg) => write!(f, "Vision processing error: {}", msg),
+            LunaError::Input(msg) => write!(f, "Input system error: {}", msg),
+            LunaError::ScreenCapture(msg) => write!(f, "Screen capture error: {}", msg),
+            LunaError::AI(msg) => write!(f, "AI processing error: {}", msg),
+            LunaError::System(msg) => write!(f, "System error: {}", msg),
+            LunaError::InvalidArgument(msg) => write!(f, "Invalid argument: {}", msg),
+            LunaError::Timeout(msg) => write!(f, "Operation timeout: {}", msg),
+            LunaError::NotFound(msg) => write!(f, "Resource not found: {}", msg),
+            LunaError::PermissionDenied(msg) => write!(f, "Permission denied: {}", msg),
         }
     }
 }
 
-/// Error severity levels
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ErrorSeverity {
-    /// System cannot continue, requires restart
-    Critical,
-    /// Major functionality impaired
-    High,
-    /// Some functionality affected
-    Medium,
-    /// Minor issue, system can continue
-    Low,
-    /// Informational, not an error
-    Info,
+impl std::error::Error for LunaError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        // Most Luna errors don't wrap other errors
+        None
+    }
 }
 
 /// Result type alias for Luna operations
 pub type LunaResult<T> = Result<T, LunaError>;
 
-/// Error context for debugging
-#[derive(Debug, Clone)]
+/// Convert from common error types
+impl From<std::io::Error> for LunaError {
+    fn from(error: std::io::Error) -> Self {
+        match error.kind() {
+            std::io::ErrorKind::NotFound => LunaError::NotFound(error.to_string()),
+            std::io::ErrorKind::PermissionDenied => LunaError::PermissionDenied(error.to_string()),
+            std::io::ErrorKind::TimedOut => LunaError::Timeout(error.to_string()),
+            _ => LunaError::System(error.to_string()),
+        }
+    }
+}
+
+impl From<serde_json::Error> for LunaError {
+    fn from(error: serde_json::Error) -> Self {
+        LunaError::Config(format!("JSON error: {}", error))
+    }
+}
+
+impl From<image::ImageError> for LunaError {
+    fn from(error: image::ImageError) -> Self {
+        LunaError::Vision(format!("Image processing error: {}", error))
+    }
+}
+
+/// Error context for better error reporting
 pub struct ErrorContext {
     pub operation: String,
-    pub timestamp: chrono::DateTime<chrono::Utc>,
-    pub user_command: Option<String>,
-    pub system_state: String,
+    pub details: Option<String>,
+    pub timestamp: std::time::SystemTime,
 }
 
 impl ErrorContext {
     pub fn new(operation: &str) -> Self {
         Self {
             operation: operation.to_string(),
-            timestamp: chrono::Utc::now(),
-            user_command: None,
-            system_state: "unknown".to_string(),
+            details: None,
+            timestamp: std::time::SystemTime::now(),
         }
     }
-    
-    pub fn with_command(mut self, command: &str) -> Self {
-        self.user_command = Some(command.to_string());
-        self
-    }
-    
-    pub fn with_state(mut self, state: &str) -> Self {
-        self.system_state = state.to_string();
+
+    pub fn with_details(mut self, details: &str) -> Self {
+        self.details = Some(details.to_string());
         self
     }
 }
+
+/// Helper trait for adding context to errors
+pub trait ErrorExt<T> {
+    fn with_context(self, context: ErrorContext) -> Result<T, LunaError>;
+    fn with_operation(self, operation: &str) -> Result<T, LunaError>;
+}
+
+impl<T, E> ErrorExt<T> for Result<T, E> 
+where 
+    E: Into<LunaError>,
+{
+    fn with_context(self, context: ErrorContext) -> Result<T, LunaError> {
+        self.map_err(|e| {
+            let base_error = e.into();
+            let error_msg = if let Some(details) = context.details {
+                format!("{}: {} ({})", context.operation, base_error, details)
+            } else {
+                format!("{}: {}", context.operation, base_error)
+            };
+            
+            // Preserve error type when possible
+            match base_error {
+                LunaError::Config(_) => LunaError::Config(error_msg),
+                LunaError::Vision(_) => LunaError::Vision(error_msg),
+                LunaError::Input(_) => LunaError::Input(error_msg),
+                LunaError::ScreenCapture(_) => LunaError::ScreenCapture(error_msg),
+                LunaError::AI(_) => LunaError::AI(error_msg),
+                _ => LunaError::System(error_msg),
+            }
+        })
+    }
+
+    fn with_operation(self, operation: &str) -> Result<T, LunaError> {
+        self.with_context(ErrorContext::new(operation))
+    }
+}
+
+/// Macro for creating errors with context
+#[macro_export]
+macro_rules! luna_error {
+    ($kind:ident, $msg:expr) => {
+        LunaError::$kind($msg.to_string())
+    };
+    ($kind:ident, $fmt:expr, $($args:tt)*) => {
+        LunaError::$kind(format!($fmt, $($args)*))
+    };
+}
+
+/// Macro for early return with error context
+#[macro_export]
+macro_rules! bail {
+    ($kind:ident, $msg:expr) => {
+        return Err(luna_error!($kind, $msg))
+    };
+    ($kind:ident, $fmt:expr, $($args:tt)*) => {
+        return Err(luna_error!($kind, $fmt, $($args)*))
+    };
+}
+
+/// Ensure condition or return error
+#[macro_export]
+macro_rules! ensure {
+    ($cond:expr, $kind:ident, $msg:expr) => {
+        if !$cond {
+            bail!($kind, $msg);
+        }
+    };
+    ($cond:expr, $kind:ident, $fmt:expr, $($args:tt)*) => {
+        if !$cond {
+            bail!($kind, $fmt, $($args)*);
+        }
+    };
+}
+
+// Re-export macros at crate level
+pub use {bail, ensure, luna_error};

@@ -1,141 +1,48 @@
 [package]
 name = "luna"
-version = "1.0.0"
+version = "0.1.0"
 edition = "2021"
-authors = ["Luna AI Team"]
-description = "Luna Visual AI - One-Click Computer Assistant"
+authors = ["William Victor <williamevictor@gmail.com>"]
+description = "Computer-use agent prototype: screen analysis with hand-written computer vision and guarded input automation"
 license = "MIT"
 repository = "https://github.com/sushiionwest/LUNA"
 readme = "README.md"
-keywords = ["ai", "computer-vision", "automation", "assistant", "rust"]
-categories = ["computer-vision", "gui", "multimedia"]
+keywords = ["computer-vision", "automation", "agent"]
+categories = ["computer-vision", "gui"]
 
 [[bin]]
 name = "luna"
 path = "src/main.rs"
 
 [dependencies]
-# Core async runtime
-tokio = { version = "1.35", features = ["full", "rt-multi-thread", "macros"] }
-futures = "0.3"
+# Image decoding/encoding at the boundaries; the CV algorithms are hand-written
+image = { version = "0.24", features = ["png", "jpeg"], default-features = false }
 
-# AI and Machine Learning - Embedded models
-candle-core = { version = "0.6", features = ["cpu"] }
-candle-nn = "0.6"
-candle-transformers = "0.6"
-hf-hub = { version = "0.3", features = ["tokio"] }
-tokenizers = "0.15"
-
-# Computer Vision - Lightweight
-image = { version = "0.24", features = ["png", "jpeg"] }
-imageproc = "0.24"
-fast_image_resize = "3.0"
-
-# Windows System APIs - Minimal set for GUI and automation
-windows = { version = "0.52", features = [
-    "Win32_Foundation",
-    "Win32_Graphics_Gdi",
-    "Win32_Graphics_Dwm", 
-    "Win32_UI_WindowsAndMessaging",
-    "Win32_UI_Input_KeyboardAndMouse",
-    "Win32_System_Threading",
-    "Win32_System_Memory",
-    "Win32_UI_Accessibility"
-] }
-
-# Native GUI Framework - Single window interface
-egui = { version = "0.24", features = ["bytemuck"], optional = true }
-eframe = { version = "0.24", features = ["wgpu", "default_fonts"], optional = true }
-
-# Audio for voice commands (optional)
-whisper-rs = { version = "0.1", optional = true }
-cpal = { version = "0.15", optional = true }
-
-# Data and Configuration
+# Configuration serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-toml = "0.8"
 
-# Error Handling and Logging
+# Error handling and logging
 anyhow = "1.0"
-thiserror = "1.0"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+log = "0.4"
+env_logger = { version = "0.10", optional = true }
 
-# Resource Embedding - Everything built into executable
-rust-embed = { version = "8.0", features = ["debug-embed"] }
-include_dir = "0.7"
-
-# Concurrency and Memory Management
-once_cell = "1.19"
-parking_lot = "0.12"
-crossbeam = "0.8"
-rayon = "1.8"
-arc-swap = "1.6"
-
-# Utilities
+# Config file location
 dirs = "5.0"
-uuid = { version = "1.6", features = ["v4"] }
-chrono = { version = "0.4", features = ["serde"] }
+
+# Safety-layer pattern matching
 regex = "1.10"
 
 [dev-dependencies]
-tokio-test = "0.4"
-criterion = { version = "0.5", features = ["html_reports"] }
 tempfile = "3.8"
 
-[build-dependencies]
-cc = "1.0"
-winres = "0.1"
-
-# Single executable configuration - Maximum optimization
 [profile.release]
-lto = "fat"                    # Link-time optimization for smallest size
-codegen-units = 1              # Single codegen unit for maximum optimization
-panic = "abort"                # Smaller binary size
-opt-level = 3                  # Maximum optimization
-strip = "symbols"              # Remove debug symbols
-overflow-checks = false        # Performance over safety in release
-rpath = false                  # No runtime path dependencies
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+opt-level = "s"
+strip = "symbols"
 
-# Embed everything approach
-[profile.release.package."*"]
-opt-level = 3
-
-[profile.dev]
-opt-level = 1
-debug = true
-incremental = true
-
-# Feature flags - Everything optional for portable build
 [features]
-default = ["embedded-models", "visual-overlay"]
-embedded-models = []           # AI models embedded in executable
-visual-overlay = ["egui", "eframe"]
-voice-commands = ["whisper-rs", "cpal"]
-debug-mode = []
-
-# Windows executable metadata
-[package.metadata.winres]
-FileDescription = "Luna Visual AI Assistant"
-CompanyName = "Luna Team"
-LegalCopyright = "© 2024 Luna Team"
-OriginalFilename = "luna.exe"
-ProductName = "Luna Visual AI"
-ProductVersion = "1.0.0"
-FileVersion = "1.0.0"
-InternalName = "luna"
-
-# Benchmarks
-[[bench]]
-name = "vision_pipeline"
-harness = false
-
-[[bench]]
-name = "screen_capture"
-harness = false
-
-# Examples
-[[example]]
-name = "basic_usage"
-path = "examples/basic_usage.rs"
+default = []
+logging = ["env_logger"]

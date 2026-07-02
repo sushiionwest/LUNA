@@ -1,220 +1,45 @@
 /*!
- * Luna Core - The brain of Luna Visual AI
+ * Luna Core - Simplified core functionality with minimal dependencies
  * 
- * Handles command processing, AI coordination, and action execution
+ * Handles command processing and action execution using lightweight patterns
  */
 
 use anyhow::Result;
-use std::sync::Arc;
-use tokio::sync::RwLock;
-use tracing::{info, debug, error};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+use log::{info, debug, warn, error};
+
+use crate::ai::AICoordinator;
+use crate::vision::ScreenCapture;
+use crate::input::InputSystem;
 
 pub mod config;
 pub mod error;
-pub mod events;
-pub mod memory;
 pub mod safety;
 
-use crate::ai::AIVisionPipeline;
-use crate::input::WindowsInputSystem;
-use crate::overlay::VisualOverlay;
-use crate::vision::ScreenCapture;
-
 pub use error::LunaError;
-pub use events::LunaEvent;
 pub use config::LunaConfig;
 
-/// Main Luna Core - coordinates all subsystems
-pub struct LunaCore {
-    /// AI vision processing pipeline
-    ai_pipeline: Arc<AIVisionPipeline>,
-    /// Screen capture system
-    screen_capture: Arc<ScreenCapture>,
-    /// Input system for mouse/keyboard
-    input_system: Arc<WindowsInputSystem>,
-    /// Visual feedback overlay
-    overlay: Arc<RwLock<VisualOverlay>>,
-    /// Configuration
-    config: LunaConfig,
-    /// Safety system
-    safety: safety::SafetySystem,
-    /// Memory manager
-    memory: memory::MemoryManager,
-}
-
-impl LunaCore {
-    /// Initialize new Luna Core instance
-    pub async fn new() -> Result<Self> {
-        info!("Initializing Luna Core...");
-        
-        // Load configuration
-        let config = LunaConfig::load()?;
-        debug!("Configuration loaded: {:?}", config);
-        
-        // Initialize AI pipeline
-        let ai_pipeline = Arc::new(AIVisionPipeline::new().await?);
-        info!("AI pipeline initialized");
-        
-        // Initialize screen capture
-        let screen_capture = Arc::new(ScreenCapture::new()?);
-        info!("Screen capture system ready");
-        
-        // Initialize input system
-        let input_system = Arc::new(WindowsInputSystem::new()?);
-        info!("Input system initialized");
-        
-        // Initialize visual overlay
-        let overlay = Arc::new(RwLock::new(VisualOverlay::new()?));
-        info!("Visual overlay ready");
-        
-        // Initialize safety system
-        let safety = safety::SafetySystem::new(&config);
-        info!("Safety system active");
-        
-        // Initialize memory manager
-        let memory = memory::MemoryManager::new();
-        info!("Memory manager initialized");
-        
-        info!("✅ Luna Core fully initialized and ready!");
-        
-        Ok(Self {
-            ai_pipeline,
-            screen_capture,
-            input_system,
-            overlay,
-            config,
-            safety,
-            memory,
-        })
-    }
-    
-    /// Execute a natural language command
-    pub async fn execute_command(&self, command: &str) -> Result<()> {
-        info!("Executing command: '{}'", command);
-        
-        // Safety check
-        if !self.safety.is_command_safe(command) {
-            return Err(LunaError::UnsafeCommand(command.to_string()).into());
-        }
-        
-        // Step 1: Take screenshot
-        debug!("Step 1: Capturing screen...");
-        let screenshot = self.screen_capture.capture_screen().await?;
-        debug!("Screenshot captured: {}x{}", screenshot.width(), screenshot.height());
-        
-        // Step 2: Analyze with AI
-        debug!("Step 2: Analyzing screen with AI...");
-        let analysis = self.ai_pipeline.analyze_screen(&screenshot, command).await?;
-        debug!("AI analysis complete: {} elements found", analysis.elements.len());
-        
-        // Step 3: Plan actions
-        debug!("Step 3: Planning actions...");
-        let actions = self.ai_pipeline.plan_actions(&analysis, command).await?;
-        debug!("Action plan: {} actions planned", actions.len());
-        
-        // Step 4: Show visual preview
-        debug!("Step 4: Showing visual preview...");
-        {
-            let mut overlay = self.overlay.write().await;
-            overlay.show_action_preview(&actions, &screenshot).await?;
-        }
-        
-        // Step 5: Wait for confirmation (3 second countdown)
-        debug!("Step 5: Waiting for confirmation...");
-        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
-        
-        // Step 6: Execute actions
-        debug!("Step 6: Executing actions...");
-        for (i, action) in actions.iter().enumerate() {
-            info!("Executing action {}/{}: {:?}", i + 1, actions.len(), action);
-            self.input_system.execute_action(action).await?;
-            
-            // Small delay between actions
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-        }
-        
-        // Hide overlay
-        {
-            let mut overlay = self.overlay.write().await;
-            overlay.hide().await;
-        }
-        
-        info!("✅ Command '{}' executed successfully!", command);
-        Ok(())
-    }
-    
-    /// Get current system status
-    pub fn get_status(&self) -> Result<LunaStatus> {
-        Ok(LunaStatus {
-            ai_ready: self.ai_pipeline.is_ready(),
-            memory_usage: self.memory.get_usage(),
-            safety_enabled: self.safety.is_enabled(),
-            uptime: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-        })
-    }
-    
-    /// Emergency stop all operations
-    pub async fn emergency_stop(&self) -> Result<()> {
-        info!("🛑 Emergency stop activated!");
-        
-        // Hide overlay immediately
-        {
-            let mut overlay = self.overlay.write().await;
-            overlay.hide().await;
-        }
-        
-        // Cancel any pending actions
-        self.input_system.cancel_all().await?;
-        
-        info!("All operations stopped");
-        Ok(())
-    }
-}
-
-/// Luna system status
+/// Screen analysis result
 #[derive(Debug, Clone)]
-pub struct LunaStatus {
-    pub ai_ready: bool,
-    pub memory_usage: u64,
-    pub safety_enabled: bool,
-    pub uptime: u64,
+pub struct ScreenAnalysis {
+    pub elements: Vec<ScreenElement>,
+    pub confidence: f32,
+    pub processing_time_ms: u64,
+    pub screen_size: (u32, u32),
 }
 
-/// Action types that Luna can perform
-#[derive(Debug, Clone)]
-pub enum LunaAction {
-    Click { x: i32, y: i32 },
-    RightClick { x: i32, y: i32 },
-    DoubleClick { x: i32, y: i32 },
-    Type { text: String },
-    KeyPress { key: String },
-    KeyCombo { keys: Vec<String> },
-    Scroll { x: i32, y: i32, direction: ScrollDirection },
-    Drag { from_x: i32, from_y: i32, to_x: i32, to_y: i32 },
-    Wait { milliseconds: u64 },
-}
-
-#[derive(Debug, Clone)]
-pub enum ScrollDirection {
-    Up,
-    Down,
-    Left,
-    Right,
-}
-
-/// Screen element detected by AI
+/// Detected screen element
 #[derive(Debug, Clone)]
 pub struct ScreenElement {
     pub element_type: String,
-    pub text: Option<String>,
     pub bounds: ElementBounds,
     pub confidence: f32,
-    pub clickable: bool,
+    pub text: Option<String>,
+    pub attributes: std::collections::HashMap<String, String>,
 }
 
+/// Element bounds rectangle
 #[derive(Debug, Clone)]
 pub struct ElementBounds {
     pub x: i32,
@@ -223,11 +48,289 @@ pub struct ElementBounds {
     pub height: i32,
 }
 
-/// AI analysis result
+/// Action to be executed by Luna
 #[derive(Debug, Clone)]
-pub struct ScreenAnalysis {
-    pub elements: Vec<ScreenElement>,
-    pub text_content: String,
-    pub screenshot_hash: String,
-    pub analysis_time_ms: u64,
+pub enum LunaAction {
+    /// Click at specific coordinates
+    Click { x: i32, y: i32 },
+    /// Type text
+    Type { text: String },
+    /// Key combination
+    KeyCombo { keys: Vec<String> },
+    /// Scroll in direction
+    Scroll { direction: String, amount: i32 },
+    /// Wait for specified time
+    Wait { milliseconds: u64 },
+}
+
+/// Luna event for coordination
+#[derive(Debug, Clone)]
+pub enum LunaEvent {
+    /// Command received from user
+    CommandReceived { command: String },
+    /// Screen analysis completed
+    AnalysisComplete { analysis: ScreenAnalysis },
+    /// Actions planned
+    ActionsPlanned { actions: Vec<LunaAction> },
+    /// Action executed
+    ActionExecuted { action: LunaAction, success: bool },
+    /// Error occurred
+    Error { error: String },
+}
+
+/// Main Luna Core - simplified coordination
+pub struct LunaCore {
+    /// AI coordinator for screen analysis
+    ai_coordinator: AICoordinator,
+    /// Screen capture system
+    screen_capture: ScreenCapture,
+    /// Input system for executing actions
+    input_system: InputSystem,
+    /// Safety system for validating commands
+    safety_system: Arc<safety::SafetySystem>,
+    /// Configuration
+    config: LunaConfig,
+    /// Processing statistics
+    stats: Arc<Mutex<ProcessingStats>>,
+    /// Event subscribers
+    event_subscribers: Arc<Mutex<Vec<Box<dyn Fn(LunaEvent) + Send + Sync>>>>,
+}
+
+/// Processing statistics
+#[derive(Debug, Default, Clone)]
+pub struct ProcessingStats {
+    pub commands_processed: u64,
+    pub actions_executed: u64,
+    pub safety_blocks: u64,
+    pub total_processing_time_ms: u64,
+    pub average_processing_time_ms: f64,
+}
+
+impl LunaCore {
+    /// Create new Luna core instance
+    pub fn new() -> Result<Self> {
+        let config = LunaConfig::default();
+        
+        Ok(Self {
+            ai_coordinator: AICoordinator::new(),
+            screen_capture: ScreenCapture::new()?,
+            input_system: InputSystem::new()?,
+            safety_system: Arc::new(safety::SafetySystem::new(&config)),
+            config,
+            stats: Arc::new(Mutex::new(ProcessingStats::default())),
+            event_subscribers: Arc::new(Mutex::new(Vec::new())),
+        })
+    }
+
+    /// Create Luna core with custom configuration
+    pub fn with_config(config: LunaConfig) -> Result<Self> {
+        Ok(Self {
+            ai_coordinator: AICoordinator::new(),
+            screen_capture: ScreenCapture::new()?,
+            input_system: InputSystem::new()?,
+            safety_system: Arc::new(safety::SafetySystem::new(&config)),
+            config: config.clone(),
+            stats: Arc::new(Mutex::new(ProcessingStats::default())),
+            event_subscribers: Arc::new(Mutex::new(Vec::new())),
+        })
+    }
+
+    /// Process user command and execute actions
+    pub fn process_command(&mut self, command: &str) -> Result<Vec<LunaAction>> {
+        let start_time = Instant::now();
+        
+        info!("Processing command: '{}'", command);
+        self.emit_event(LunaEvent::CommandReceived { 
+            command: command.to_string() 
+        });
+
+        // Step 1: Safety check
+        if !self.safety_system.is_command_safe(command) {
+            warn!("Command blocked by safety system: '{}'", command);
+            self.update_stats(|stats| stats.safety_blocks += 1);
+            return Err(LunaError::UnsafeCommand(command.to_string()).into());
+        }
+
+        // Step 2: Capture current screen
+        let screenshot = self.screen_capture.capture_screen()?;
+        debug!("Screen captured: {}x{}", screenshot.width(), screenshot.height());
+
+        // Step 3: Analyze screen to understand current state
+        let analysis = self.ai_coordinator.analyze_screen(&screenshot)?;
+        debug!("Screen analysis complete: {} elements detected", analysis.elements.len());
+        
+        self.emit_event(LunaEvent::AnalysisComplete { 
+            analysis: analysis.clone() 
+        });
+
+        // Step 4: Plan actions based on command and screen state
+        let actions = self.ai_coordinator.plan_actions(command, &analysis)?;
+        debug!("Planned {} actions", actions.len());
+        
+        self.emit_event(LunaEvent::ActionsPlanned { 
+            actions: actions.clone() 
+        });
+
+        // Step 5: Validate actions with safety system
+        for action in &actions {
+            if !self.safety_system.is_action_safe(action) {
+                warn!("Action blocked by safety system: {:?}", action);
+                self.update_stats(|stats| stats.safety_blocks += 1);
+                return Err(LunaError::UnsafeAction(format!("{:?}", action)).into());
+            }
+        }
+
+        // Step 6: Execute actions
+        for action in &actions {
+            match self.input_system.execute_action(action) {
+                Ok(_) => {
+                    debug!("Action executed successfully: {:?}", action);
+                    self.emit_event(LunaEvent::ActionExecuted { 
+                        action: action.clone(), 
+                        success: true 
+                    });
+                }
+                Err(e) => {
+                    error!("Failed to execute action {:?}: {}", action, e);
+                    self.emit_event(LunaEvent::ActionExecuted { 
+                        action: action.clone(), 
+                        success: false 
+                    });
+                    return Err(e);
+                }
+            }
+            
+            // Small delay between actions for stability
+            std::thread::sleep(Duration::from_millis(50));
+        }
+
+        // Update statistics
+        let processing_time = start_time.elapsed();
+        let processing_time_ms = processing_time.as_millis() as u64;
+        
+        self.update_stats(|stats| {
+            stats.commands_processed += 1;
+            stats.actions_executed += actions.len() as u64;
+            stats.total_processing_time_ms += processing_time_ms;
+            stats.average_processing_time_ms = 
+                stats.total_processing_time_ms as f64 / stats.commands_processed as f64;
+        });
+
+        info!("Command processed successfully in {}ms: {} actions executed", 
+              processing_time_ms, actions.len());
+
+        Ok(actions)
+    }
+
+    /// Get current screen analysis without executing actions
+    pub fn analyze_current_screen(&mut self) -> Result<ScreenAnalysis> {
+        let screenshot = self.screen_capture.capture_screen()?;
+        self.ai_coordinator.analyze_screen(&screenshot)
+    }
+
+    /// Subscribe to Luna events
+    pub fn subscribe_to_events<F>(&self, callback: F) 
+    where 
+        F: Fn(LunaEvent) + Send + Sync + 'static,
+    {
+        if let Ok(mut subscribers) = self.event_subscribers.lock() {
+            subscribers.push(Box::new(callback));
+        }
+    }
+
+    /// Get processing statistics
+    pub fn get_stats(&self) -> ProcessingStats {
+        self.stats.lock().unwrap_or_else(|_| {
+            std::sync::PoisonError::into_inner
+        }).clone()
+    }
+
+    /// Get configuration
+    pub fn get_config(&self) -> &LunaConfig {
+        &self.config
+    }
+
+    /// Update configuration
+    pub fn update_config(&mut self, config: LunaConfig) -> Result<()> {
+        self.config = config.clone();
+        self.safety_system = Arc::new(safety::SafetySystem::new(&config));
+        Ok(())
+    }
+
+    /// Check if Luna is ready to process commands
+    pub fn is_ready(&self) -> bool {
+        // Simple readiness check
+        true
+    }
+
+    /// Emit event to all subscribers
+    fn emit_event(&self, event: LunaEvent) {
+        if let Ok(subscribers) = self.event_subscribers.lock() {
+            for callback in subscribers.iter() {
+                callback(event.clone());
+            }
+        }
+    }
+
+    /// Update statistics with a closure
+    fn update_stats<F>(&self, updater: F) 
+    where 
+        F: FnOnce(&mut ProcessingStats),
+    {
+        if let Ok(mut stats) = self.stats.lock() {
+            updater(&mut *stats);
+        }
+    }
+}
+
+impl Default for LunaCore {
+    fn default() -> Self {
+        Self::new().expect("Failed to create default LunaCore")
+    }
+}
+
+// Helper functions for common operations
+impl LunaCore {
+    /// Click at specific coordinates
+    pub fn click(&mut self, x: i32, y: i32) -> Result<()> {
+        let action = LunaAction::Click { x, y };
+        if self.safety_system.is_action_safe(&action) {
+            self.input_system.execute_action(&action)
+        } else {
+            Err(LunaError::UnsafeAction(format!("Click at ({}, {})", x, y)).into())
+        }
+    }
+
+    /// Type text
+    pub fn type_text(&mut self, text: &str) -> Result<()> {
+        let action = LunaAction::Type { text: text.to_string() };
+        if self.safety_system.is_action_safe(&action) {
+            self.input_system.execute_action(&action)
+        } else {
+            Err(LunaError::UnsafeAction(format!("Type text: {}", text)).into())
+        }
+    }
+
+    /// Send key combination
+    pub fn send_keys(&mut self, keys: Vec<String>) -> Result<()> {
+        let action = LunaAction::KeyCombo { keys };
+        if self.safety_system.is_action_safe(&action) {
+            self.input_system.execute_action(&action)
+        } else {
+            Err(LunaError::UnsafeAction("Key combination".to_string()).into())
+        }
+    }
+
+    /// Scroll in direction
+    pub fn scroll(&mut self, direction: &str, amount: i32) -> Result<()> {
+        let action = LunaAction::Scroll { 
+            direction: direction.to_string(), 
+            amount 
+        };
+        if self.safety_system.is_action_safe(&action) {
+            self.input_system.execute_action(&action)
+        } else {
+            Err(LunaError::UnsafeAction(format!("Scroll {}", direction)).into())
+        }
+    }
 }
